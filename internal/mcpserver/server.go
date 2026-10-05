@@ -30,6 +30,14 @@ func result(value any, err error) (*mcp.CallToolResult, any, error) {
 
 func New(e *engine.Engine, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "tripo-mcp", Version: version}, nil)
+	mcp.AddTool(s, &mcp.Tool{Name: "tripo_estimate", Description: "Estimation locale datée du barème Studio, sans crédit ni requête réseau. Fournir exactement un objet generate, edit, export ou import. Ce n'est pas un devis garanti."}, func(_ context.Context, _ *mcp.CallToolRequest, in engine.EstimateRequest) (*mcp.CallToolResult, any, error) {
+		v, err := engine.Estimate(in)
+		return result(v, err)
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "tripo_cost", Description: "Actualise le coût réel d'une tâche par son operator_id dans l'historique Studio : débits, remboursements et réservations. Lecture seule, fiable en parallèle, aucun calcul par différence de solde."}, func(ctx context.Context, _ *mcp.CallToolRequest, in JobInput) (*mcp.CallToolResult, any, error) {
+		v, err := e.Costs(ctx, in.JobID)
+		return result(v, err)
+	})
 	mcp.AddTool(s, &mcp.Tool{Name: "tripo_import_model", Description: "Téléverse un modèle local GLB/FBX/OBJ/STL et crée un projet Studio pour texturing ou édition. confirm=true et request_id stable requis."}, func(ctx context.Context, _ *mcp.CallToolRequest, in engine.ImportRequest) (*mcp.CallToolResult, any, error) {
 		if in.RequestID == "" {
 			return result(nil, fault.New("INVALID_ARGUMENT", "Fournir un request_id stable."))

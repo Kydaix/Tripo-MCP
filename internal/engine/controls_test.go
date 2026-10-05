@@ -22,6 +22,8 @@ func TestPartialBatchPersistsAllVariantsAndResumes(t *testing.T) {
 	var paid atomic.Int32
 	e := setup(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v2/studio/txn/records":
+			io.WriteString(w, `{"code":0,"data":{"records":[],"have_more":false}}`)
 		case "/v2/studio/operation/text_to_model":
 			paid.Add(1)
 			io.WriteString(w, `{"code":0,"data":{"variations":[{"accepted":true,"project_id":"p1","operator_id":"o1"},{"accepted":false},{"accepted":true,"project_id":"p3","operator_id":"o3"},{"accepted":true,"project_id":"p4","operator_id":"o4"}]}}`)
@@ -246,5 +248,56 @@ func TestTextureResolvesAllPartsFromDownloadedSource(t *testing.T) {
 	_, err = e.Edit(context.Background(), EditRequest{EditInput: studio.EditInput{Operation: "texture", Prompt: "bronze"}, JobID: "source", RequestID: "texture-auto-parts", Confirm: true})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestImportedTextureChecksUVEvenWithExplicitParts(t *testing.T) {
+	for _, tc := range []struct {
+		uv                    string
+		override, validSource bool
+		want                  string
+	}{
+		{"unusable", false, false, "UV_UNUSABLE"},
+		{"unusable", true, false, "UV_UNUSABLE"},
+		{"unverified", false, false, "UV_UNVERIFIED"},
+		{"unverified", true, false, ""},
+		{"unverified", false, true, ""},
+		{"checked", false, false, ""},
+	} {
+		writes := 0
+		e := setup(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" {
+				io.WriteString(w, sourceReply)
+				return
+			}
+			writes++
+			io.WriteString(w, `{"code":0,"data":{"operator_id":"textured","project_id":"project"}}`)
+		})
+		seedSource(t, e)
+		j, _ := e.read("source")
+		j.Kind = "import"
+		j.State = "downloaded"
+		// Cached inspection is produced by the separately tested GLB inspector.
+		p := filepath.Join(t.TempDir(), "cached.glb")
+		data := []byte("local artifact")
+		os.WriteFile(p, data, 0600)
+		h := sha256.Sum256(data)
+		j.Artifact = &studio.Artifact{Path: p, Bytes: int64(len(data)), SHA256: hex.EncodeToString(h[:]), Format: "glb"}
+		j.Inspection = &studio.ModelInspection{UVStatus: tc.uv}
+		if tc.validSource {
+			j.ImportInfo = &studio.ImportInfo{UseOriginalUV: true, Source: &studio.ModelInspection{UVStatus: "checked"}}
+			j.UVSourceVerified = true
+		}
+		if err := e.save(&j); err != nil {
+			t.Fatal(err)
+		}
+		v, err := e.Edit(context.Background(), EditRequest{EditInput: studio.EditInput{Operation: "texture", Prompt: "bronze", Parts: []string{"mesh"}, AllowUnverifiedUV: tc.override}, JobID: "source", RequestID: "uv-gate", Confirm: true})
+		if tc.want != "" {
+			if err == nil || fault.Public(err).Code != tc.want || writes != 0 || !v.Retryable {
+				t.Fatalf("%+v %v writes=%d", v, err, writes)
+			}
+		} else if err != nil || writes != 1 {
+			t.Fatalf("%+v %v writes=%d", v, err, writes)
+		}
 	}
 }

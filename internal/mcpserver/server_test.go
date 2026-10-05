@@ -27,7 +27,7 @@ func TestMCPRoundTrip(t *testing.T) {
 	}
 	defer cs.Close()
 	list, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
-	if err != nil || len(list.Tools) != 10 {
+	if err != nil || len(list.Tools) != 12 {
 		t.Fatalf("tool list: %v %v", list, err)
 	}
 	for _, tool := range list.Tools {
@@ -45,5 +45,13 @@ func TestMCPRoundTrip(t *testing.T) {
 	result, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "tripo_generate", Arguments: map[string]any{"request_id": "test", "prompt": "owl", "confirm": false}})
 	if err != nil || !result.IsError {
 		t.Fatalf("authorization was not enforced: %v %v", result, err)
+	}
+	result, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: "tripo_estimate", Arguments: map[string]any{"edit": map[string]any{"operation": "texture", "prompt": "bronze", "texture_quality": "detailed"}}})
+	if err != nil || result.IsError {
+		t.Fatalf("offline estimate: %v %v", result, err)
+	}
+	encoded, _ := json.Marshal(result.StructuredContent)
+	if !strings.Contains(string(encoded), `"amount":20`) {
+		t.Fatalf("wrong MCP estimate: %s", encoded)
 	}
 }

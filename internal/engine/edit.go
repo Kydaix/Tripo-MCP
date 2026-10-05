@@ -161,6 +161,21 @@ func (e *Engine) Edit(ctx context.Context, in EditRequest) (View, error) {
 	if err != nil {
 		return e.failPreparing(&j, err)
 	}
+	// Inspect the actual Studio result, even when callers supply part names.
+	// Passing use_original_uv=false does not prove the service rebuilt it.
+	if params.Operation == "texture" && (source.Kind == "import" || source.ImportInfo != nil) {
+		model, err := e.Download(ctx, source.ID, "")
+		if err != nil {
+			return e.failPreparing(&j, err)
+		}
+		if err = studio.CheckTextureUV(model.Inspection); err != nil {
+			return e.failPreparing(&j, err)
+		}
+		verifiedOriginal := source.UVSourceVerified
+		if (model.Inspection == nil || model.Inspection.UVStatus != "checked") && !verifiedOriginal && !params.AllowUnverifiedUV {
+			return e.failPreparing(&j, fault.New("UV_UNVERIFIED", "Les UV de ce modèle importé ne sont pas inspectables localement. Réimporter un GLB avec un atlas validé et use_original_uv=true, ou vérifier les UV dans un DCC puis utiliser allow_unverified_uv=true. Aucun texturage envoyé."))
+		}
+	}
 	if len(params.Parts) == 0 && (params.Operation == "texture" || params.Operation == "remesh") {
 		model, err := e.Download(ctx, source.ID, "")
 		if err != nil {
@@ -195,6 +210,12 @@ func (e *Engine) Edit(ctx context.Context, in EditRequest) (View, error) {
 		return e.failPreparing(&j, err)
 	}
 	j.State = "outcome_unknown"
+	j.Retryable = false
+	j.Warnings = source.Warnings
+	j.ImportInfo = source.ImportInfo
+	// Geometry/UV-changing operations invalidate the original-atlas evidence.
+	j.UVSourceVerified = source.UVSourceVerified && (params.Operation == "texture" || params.Operation == "upscale" || params.Operation == "pbr")
+	j.Credits = &studio.Credits{Estimate: studio.EstimateEdit(params)}
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}
@@ -203,11 +224,36 @@ func (e *Engine) Edit(ctx context.Context, in EditRequest) (View, error) {
 }
 func (e *Engine) failPreparing(j *Job, err error) (View, error) {
 	j.State = "failed"
+	j.Retryable = true
 	j.Error = fault.Public(err)
 	if saveErr := e.save(j); saveErr != nil {
 		return j.View(), saveErr
 	}
 	return j.View(), err
+}
+
+// Resume only an explicit identical call whose journal proves no submission.
+// Legacy audit/upload errors also occurred exclusively before dispatch.
+func (j Job) canResume() bool {
+	if j.Receipt.ProjectID != "" || j.Receipt.OperatorID != "" || len(j.Variants) != 0 {
+		return false
+	}
+	if j.State == "preparing" {
+		return true
+	}
+	if j.State != "failed" {
+		return false
+	}
+	if j.Retryable {
+		return true
+	}
+	if j.Error != nil {
+		switch j.Error.Code {
+		case "IMAGE_REJECTED", "IMAGE_REVIEW_REQUIRED", "UPLOAD_FAILED", "INPUT_CHANGED":
+			return true
+		}
+	}
+	return false
 }
 func (e *Engine) finish(j *Job, err error) (View, error) {
 	if err != nil {

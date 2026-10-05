@@ -178,9 +178,9 @@ func (c *Client) auditImage(ctx context.Context, image *Image) error {
 		image.Audit = audit.Result
 		return nil
 	case "reject":
-		return fault.New("IMAGE_REJECTED", "Studio a refusé cette image ; vérifier celle-ci dans Studio.")
+		return fault.New("IMAGE_REJECTED", "L'audit Studio a renvoyé reject. Aucun motif détaillé fourni ; un PNG valide peut être refusé par cet audit. Vérifier l'image dans Studio. Aucune génération envoyée ; la même demande peut être reprise avec le même request_id.")
 	case "sensitive", "nsfw":
-		return fault.New("IMAGE_REVIEW_REQUIRED", "Studio signale une image sensible ; vérifier celle-ci et les éventuelles confirmations dans Studio.")
+		return fault.New("IMAGE_REVIEW_REQUIRED", "L'audit Studio a renvoyé "+audit.Result+" ; vérifier l'image et les éventuelles confirmations dans Studio. Aucune génération envoyée.")
 	default:
 		return fault.New("PROTOCOL_CHANGED", "Résultat de validation d'image Studio inconnu ; aucune génération envoyée.")
 	}

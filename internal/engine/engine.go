@@ -30,39 +30,50 @@ type Engine struct {
 func New(root string) *Engine { return &Engine{Root: root, Client: studio.New, Renew: auth.Renew} }
 
 type Job struct {
-	Variants    []Job            `json:"variants,omitempty"`
-	ID          string           `json:"id"`
-	Kind        string           `json:"kind"`
-	State       string           `json:"state"`
-	Account     string           `json:"account"`
-	RequestHash string           `json:"request_hash"`
-	Receipt     studio.Receipt   `json:"receipt"`
-	Format      string           `json:"format"`
-	Progress    float64          `json:"progress"`
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
-	Error       *fault.Error     `json:"error,omitempty"`
-	Artifact    *studio.Artifact `json:"artifact,omitempty"`
-	DownloadRef []byte           `json:"download_ref,omitempty"`
+	Retryable        bool                    `json:"retryable,omitempty"`
+	Warnings         []string                `json:"warnings,omitempty"`
+	Credits          *studio.Credits         `json:"credits,omitempty"`
+	Inspection       *studio.ModelInspection `json:"inspection,omitempty"`
+	ImportInfo       *studio.ImportInfo      `json:"import_info,omitempty"`
+	UVSourceVerified bool                    `json:"uv_source_verified,omitempty"`
+	Variants         []Job                   `json:"variants,omitempty"`
+	ID               string                  `json:"id"`
+	Kind             string                  `json:"kind"`
+	State            string                  `json:"state"`
+	Account          string                  `json:"account"`
+	RequestHash      string                  `json:"request_hash"`
+	Receipt          studio.Receipt          `json:"receipt"`
+	Format           string                  `json:"format"`
+	Progress         float64                 `json:"progress"`
+	CreatedAt        time.Time               `json:"created_at"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+	Error            *fault.Error            `json:"error,omitempty"`
+	Artifact         *studio.Artifact        `json:"artifact,omitempty"`
+	DownloadRef      []byte                  `json:"download_ref,omitempty"`
 }
 
 // View is the public job representation; credentials, URLs and internal identity never escape.
 type View struct {
-	Format     string           `json:"format,omitempty"`
-	Variants   []View           `json:"variants,omitempty"`
-	ID         string           `json:"job_id"`
-	Kind       string           `json:"kind"`
-	State      string           `json:"state"`
-	ProjectID  string           `json:"project_id,omitempty"`
-	OperatorID string           `json:"operator_id,omitempty"`
-	Progress   float64          `json:"progress"`
-	CreatedAt  time.Time        `json:"created_at"`
-	Error      *fault.Error     `json:"error,omitempty"`
-	Artifact   *studio.Artifact `json:"artifact,omitempty"`
+	Retryable  bool                    `json:"retryable"`
+	Warnings   []string                `json:"warnings,omitempty"`
+	Credits    *studio.Credits         `json:"credits,omitempty"`
+	Inspection *studio.ModelInspection `json:"inspection,omitempty"`
+	ImportInfo *studio.ImportInfo      `json:"import_info,omitempty"`
+	Format     string                  `json:"format,omitempty"`
+	Variants   []View                  `json:"variants,omitempty"`
+	ID         string                  `json:"job_id"`
+	Kind       string                  `json:"kind"`
+	State      string                  `json:"state"`
+	ProjectID  string                  `json:"project_id,omitempty"`
+	OperatorID string                  `json:"operator_id,omitempty"`
+	Progress   float64                 `json:"progress"`
+	CreatedAt  time.Time               `json:"created_at"`
+	Error      *fault.Error            `json:"error,omitempty"`
+	Artifact   *studio.Artifact        `json:"artifact,omitempty"`
 }
 
 func (j Job) View() View {
-	v := View{ID: j.ID, Kind: j.Kind, State: j.State, ProjectID: j.Receipt.ProjectID, OperatorID: j.Receipt.OperatorID, Progress: j.Progress, CreatedAt: j.CreatedAt, Error: j.Error, Artifact: j.Artifact}
+	v := View{ID: j.ID, Kind: j.Kind, State: j.State, ProjectID: j.Receipt.ProjectID, OperatorID: j.Receipt.OperatorID, Progress: j.Progress, CreatedAt: j.CreatedAt, Error: j.Error, Artifact: j.Artifact, Retryable: j.canResume(), Warnings: j.Warnings, Credits: j.Credits, Inspection: j.Inspection, ImportInfo: j.ImportInfo}
 	if j.Artifact != nil {
 		v.Format = j.Artifact.Format
 	}
@@ -289,7 +300,9 @@ func (e *Engine) Generate(ctx context.Context, in GenerateRequest) (View, error)
 		return e.failPreparing(&j, err)
 	}
 	// Persist uncertainty before dispatch; a crash at any later instruction cannot trigger a second charge.
+	j.Retryable = false
 	j.State = "outcome_unknown"
+	j.Credits = &studio.Credits{Estimate: studio.EstimateGeneration(params)}
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}
@@ -346,12 +359,20 @@ func (e *Engine) begin(id, kind, format, account, hash string) (Job, func(), boo
 			unlock()
 			return j, nil, false, err
 		}
+		if j.canResume() {
+			j.State, j.Error, j.Retryable = "preparing", nil, true
+			if err = e.save(&j); err != nil {
+				unlock()
+				return j, nil, false, err
+			}
+			return j, unlock, false, nil
+		}
 		return j, unlock, true, nil
 	} else if !os.IsNotExist(err) {
 		unlock()
 		return Job{}, nil, false, err
 	}
-	j := Job{ID: id, Kind: kind, Format: format, State: "preparing", Account: account, RequestHash: hash, CreatedAt: time.Now().UTC()}
+	j := Job{ID: id, Kind: kind, Format: format, State: "preparing", Retryable: true, Account: account, RequestHash: hash, CreatedAt: time.Now().UTC()}
 	if err = e.save(&j); err != nil {
 		unlock()
 		return j, nil, false, err
@@ -419,15 +440,30 @@ func (e *Engine) Poll(ctx context.Context, id string) (View, error) {
 }
 
 func (e *Engine) poll(ctx context.Context, j *Job) error {
-	if j.State == "downloaded" || studio.Terminal(j.State) || j.State == "outcome_unknown" || j.Receipt.OperatorID == "" {
+	if j.State == "outcome_unknown" || j.Receipt.OperatorID == "" {
+		return nil
+	}
+	terminal := j.State == "downloaded" || studio.Terminal(j.State)
+	if terminal && j.Credits != nil && j.Credits.Actual != nil && j.Credits.Actual.Status == "recorded" {
 		return nil
 	}
 	s, c, err := e.client(ctx)
 	if err != nil {
+		if terminal {
+			if j.Credits == nil {
+				j.Credits = &studio.Credits{}
+			}
+			j.Credits.Actual = &studio.Usage{Status: "unavailable", CheckedAt: time.Now().UTC(), Note: fault.Public(err).Message}
+			return nil
+		}
 		return err
 	}
 	if s.Account != j.Account {
 		return fault.New("ACCOUNT_CHANGED", "Cette tâche appartient à une autre session Studio.")
+	}
+	if terminal {
+		e.refreshCredits(ctx, c, j)
+		return nil
 	}
 	progress, err := c.Progress(ctx, j.Receipt.OperatorID)
 	if err != nil {
@@ -450,6 +486,9 @@ func (e *Engine) poll(ctx context.Context, j *Job) error {
 		if err != nil {
 			return err
 		}
+	}
+	if studio.Terminal(j.State) {
+		e.refreshCredits(ctx, c, j)
 	}
 	return nil
 }
@@ -494,6 +533,12 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 	if j.State == "downloaded" && j.Artifact != nil {
 		artifact, err := studio.ReuseArtifact(ctx, *j.Artifact, path)
 		if err == nil {
+			if j.Inspection == nil {
+				inspectArtifact(&j, artifact.Path)
+				if err = e.save(&j); err != nil {
+					return j.View(), err
+				}
+			}
 			if artifact.Path != j.Artifact.Path {
 				j.Artifact = &artifact
 				if err = e.save(&j); err != nil {
@@ -563,6 +608,10 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 	}
 	j.Artifact = &artifact
 	j.State = "downloaded"
+	inspectArtifact(&j, artifact.Path)
+	if j.Credits == nil || j.Credits.Actual == nil {
+		e.refreshCredits(ctx, c, &j)
+	}
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}
@@ -626,6 +675,11 @@ func (e *Engine) Export(ctx context.Context, in ExportRequest) (View, error) {
 		return e.failPreparing(&j, err)
 	}
 	j.State = "outcome_unknown"
+	j.Retryable = false
+	j.Warnings = source.Warnings
+	j.ImportInfo = source.ImportInfo
+	j.UVSourceVerified = source.UVSourceVerified
+	j.Credits = &studio.Credits{Estimate: studio.EstimateExport(opts)}
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}

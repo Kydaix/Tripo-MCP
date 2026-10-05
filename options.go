@@ -13,13 +13,18 @@ import (
 
 type stringsFlag struct{ target *[]string }
 
-func (s stringsFlag) String() string     { return strings.Join(*s.target, ",") }
+func (s stringsFlag) String() string {
+	if s.target == nil {
+		return ""
+	}
+	return strings.Join(*s.target, ",")
+}
 func (s stringsFlag) Set(v string) error { *s.target = append(*s.target, v); return nil }
 
 type optionalBool struct{ target **bool }
 
 func (s optionalBool) String() string {
-	if *s.target == nil {
+	if s.target == nil || *s.target == nil {
 		return ""
 	}
 	return strconv.FormatBool(**s.target)
@@ -68,6 +73,7 @@ func generationFlags(f *flag.FlagSet, p *studio.GenerateInput) {
 	f.Var(optionalBool{&p.Symmetry}, "symmetry", "symétrie P2.0 ; détection automatique si omis")
 }
 func editFlags(f *flag.FlagSet, p *studio.EditInput) {
+	f.BoolVar(&p.AllowUnverifiedUV, "allow-unverified-uv", false, "texture importée : UV contrôlés ailleurs si le GLB est compressé ou le format non inspectable")
 	f.StringVar(&p.Operation, "operation", "", "texture, upscale, pbr, remesh, segment, fill, complete, rig ou animate")
 	f.StringVar(&p.Prompt, "prompt", "", "description de texture")
 	f.StringVar(&p.Image, "image", "", "image de référence")
