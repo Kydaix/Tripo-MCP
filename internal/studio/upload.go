@@ -158,15 +158,30 @@ func (c *Client) upload(ctx context.Context, path string, model bool) (*Image, e
 	if model {
 		return image, nil
 	}
+	if err = c.auditImage(ctx, image); err != nil {
+		return nil, err
+	}
+	return image, nil
+}
+
+func (c *Client) auditImage(ctx context.Context, image *Image) error {
 	var audit struct {
 		Result string `json:"result"`
 	}
-	if err = c.request(ctx, "POST", "/v2/studio/audit/image", map[string]any{"image": map[string]string{"bucket": image.Bucket, "key": image.Key}}, &audit, false); err != nil {
-		return nil, err
+	if err := c.request(ctx, "POST", "/v2/studio/audit/image", map[string]any{"image": map[string]string{"bucket": image.Bucket, "key": image.Key}}, &audit, false); err != nil {
+		return err
 	}
-	if audit.Result != "normal" {
-		return nil, fault.New("IMAGE_REJECTED", "Studio n'a pas validé cette image ; vérifier celle-ci dans Studio.")
+	// Studio's reference-image audit returns "pass", not "normal". Preserve
+	// its verdict in subsequent generation and texture payloads.
+	switch audit.Result {
+	case "pass":
+		image.Audit = audit.Result
+		return nil
+	case "reject":
+		return fault.New("IMAGE_REJECTED", "Studio a refusé cette image ; vérifier celle-ci dans Studio.")
+	case "sensitive", "nsfw":
+		return fault.New("IMAGE_REVIEW_REQUIRED", "Studio signale une image sensible ; vérifier celle-ci et les éventuelles confirmations dans Studio.")
+	default:
+		return fault.New("PROTOCOL_CHANGED", "Résultat de validation d'image Studio inconnu ; aucune génération envoyée.")
 	}
-	image.Audit = audit.Result
-	return image, nil
 }

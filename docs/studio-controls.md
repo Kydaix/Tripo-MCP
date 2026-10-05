@@ -34,6 +34,8 @@ Quatre modes d’entrée exclusifs :
 - `images` : quatre chemins avant/gauche/arrière/droite ; chaîne vide pour un emplacement absent, avant et au moins une autre vue requis. CLI : quatre occurrences de `--view`, ou `--params` pour les emplacements vides.
 - `batch_images` : chemins d’images indépendantes. CLI : occurrences de `--batch-image`. Limite locale de 100 images, soumise aussi aux limites du compte.
 
+Le téléversement est suivi de l’audit d’image de Studio. Son verdict `pass` est conservé dans la demande de génération ou de texture. `reject` produit `IMAGE_REJECTED` ; les images signalées `sensitive` ou `nsfw` demandent une vérification dans Studio (`IMAGE_REVIEW_REQUIRED`). Un verdict absent ou inconnu produit `PROTOCOL_CHANGED`, sans soumission payante. Les tâches qui ont déjà échoué pendant cet audit ne sont pas rejouées automatiquement après une mise à jour : utiliser un nouvel identifiant uniquement après avoir vérifié l’échec avant soumission.
+
 Le budget minimal est de 500 polygones, ou 10 000 en génération de parties. Maximum HD : 1 million de triangles en standard, 2 millions en H3.1 Ultra, 50 000 quadrangles. Smart Poly HD : 20 000 triangles / 10 000 quadrangles. P2 : 50 000 triangles / 25 000 quadrangles. P1 : 20 000.
 
 P2 utilise les quadrangles et 5 000 polygones par défaut. Ses variantes partagent une seule soumission Studio, avec des reçus séparés. P2 ne reçoit pas les options de texture du générateur HD : appliquer une texture ensuite. La génération en parties est incompatible avec les quadrangles et les textures actives. Ultra Mesh Quality est réservé à H3.1. AI Complete s’applique aux images uniques et lots HD.
