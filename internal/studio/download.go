@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Kydaix/Tripo-MCP/internal/fault"
+	"github.com/Kydaix/Tripo-MCP/internal/local"
 )
 
 type Artifact struct {
@@ -131,8 +132,7 @@ func Download(ctx context.Context, raw, destination, format string) (Artifact, e
 	if err = tmp.Close(); err != nil {
 		return result, err
 	}
-	// On Windows Rename refuses an existing destination, protecting concurrent downloads.
-	if err = os.Rename(tmp.Name(), destination); err != nil {
+	if err = local.CommitNew(tmp.Name(), destination); err != nil {
 		return result, fault.New("DOWNLOAD_FAILED", "Impossible de finaliser le fichier ; vérifier la destination.")
 	}
 	return Artifact{Path: destination, Bytes: n, SHA256: hex.EncodeToString(h.Sum(nil)), Format: format}, nil

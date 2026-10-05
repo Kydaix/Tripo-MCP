@@ -23,6 +23,19 @@ func replace(src, dst string) error {
 	return windows.MoveFileEx(s, d, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
 
+// CommitNew atomically refuses a destination created by another writer, even after a prior stat.
+func CommitNew(src, dst string) error {
+	s, err := windows.UTF16PtrFromString(src)
+	if err != nil {
+		return err
+	}
+	d, err := windows.UTF16PtrFromString(dst)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(s, d, windows.MOVEFILE_WRITE_THROUGH)
+}
+
 // Lock is an OS-backed lock released even when the owner crashes.
 func Lock(path string) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
