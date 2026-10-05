@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/Kydaix/Tripo-MCP/internal/fault"
 )
@@ -59,7 +60,18 @@ func WriteJSON(path string, v any) error {
 
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
-func ValidID(id string) bool { return safeID.MatchString(id) }
+func ValidID(id string) bool {
+	if !safeID.MatchString(id) {
+		return false
+	}
+	// Windows device names stay reserved even with a .json or .lock suffix.
+	name := strings.ToUpper(id)
+	switch name {
+	case "CON", "PRN", "AUX", "NUL":
+		return false
+	}
+	return !(len(name) == 4 && (strings.HasPrefix(name, "COM") || strings.HasPrefix(name, "LPT")) && name[3] >= '1' && name[3] <= '9')
+}
 
 func JobPath(root, id string) (string, error) {
 	if !ValidID(id) {

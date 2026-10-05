@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,18 @@ func TestCLIParameterFileRejectsUnknownFieldsAndConflicts(t *testing.T) {
 	code, _ = cli(t, "generate", "--params", p, "--dry-run")
 	if code != 2 {
 		t.Fatal("unknown JSON field accepted")
+	}
+}
+
+func TestCLIParameterFileRejectsNullTrailingAndOversizedInput(t *testing.T) {
+	for _, body := range []string{"null", "{} {}", "{}" + strings.Repeat(" ", 1<<20) + `{"format":"fbx"}`} {
+		path := filepath.Join(t.TempDir(), "params.json")
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		code, _ := cli(t, "export", "source", "--params", path, "--dry-run")
+		if code != 2 {
+			t.Fatal("invalid parameter file accepted")
+		}
 	}
 }

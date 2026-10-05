@@ -114,7 +114,7 @@ func (e *Engine) Attach(ctx context.Context, in AttachRequest) (View, error) {
 	}
 	op, _ := detail["operator"].(map[string]any)
 	operator, _ := op["operator_id"].(string)
-	if operator == "" || studio.AssetURL(detail) == "" || detail["running_operator"] != nil {
+	if operator == "" || studio.AssetURL(detail) == "" || projectRunning(detail) {
 		return e.failPreparing(&j, fault.New("NOT_READY", "Le projet n'a pas de version terminée reconnue."))
 	}
 	j.Receipt = studio.Receipt{ProjectID: in.ProjectID, OperatorID: operator}

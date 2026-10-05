@@ -81,6 +81,9 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	if resp.StatusCode == http.StatusForbidden {
 		return fault.New("ACCESS_DENIED", "Studio refuse la requête ; vérifier le compte et les éventuelles vérifications dans le navigateur.")
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return uncertain(paid, "RATE_LIMITED", "Trop de requêtes Studio ; réessayer la lecture plus tard.")
+	}
 	if resp.StatusCode >= 500 {
 		return uncertain(paid, "HTTP_ERROR", "Service Studio temporairement indisponible.")
 	}
@@ -100,7 +103,7 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return uncertain(paid, "HTTP_ERROR", fmt.Sprintf("Studio a répondu HTTP %d.", resp.StatusCode))
 	}
-	if out != nil && json.Unmarshal(envelope.Data, out) != nil {
+	if out != nil && (bytes.Equal(bytes.TrimSpace(envelope.Data), []byte("null")) || json.Unmarshal(envelope.Data, out) != nil) {
 		return uncertain(paid, "PROTOCOL_CHANGED", "Structure de réponse Studio inconnue.")
 	}
 	return nil

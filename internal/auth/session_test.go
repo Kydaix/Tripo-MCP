@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,5 +55,19 @@ func TestInvalidSession(t *testing.T) {
 	}
 	if _, err := FromHeader("Bearer "+token(t, time.Now().Add(time.Hour)), "bad\r\nheader", ""); err == nil {
 		t.Fatal("accepted header injection")
+	}
+}
+
+func TestSessionRejectsInvalidHTTPHeaderBytes(t *testing.T) {
+	jwt := token(t, time.Now().Add(time.Hour))
+	for _, device := range []string{"bad\x00value", "bad\tvalue", "device id", "é", strings.Repeat("x", 257)} {
+		if _, err := FromHeader("Bearer "+jwt, device, ""); err == nil {
+			t.Fatal("invalid device accepted")
+		}
+	}
+	for _, bad := range []string{jwt + "\r\nOther: value", "." + strings.Split(jwt, ".")[1] + ".sig", jwt + "!"} {
+		if _, err := FromHeader("Bearer "+bad, "device", ""); err == nil {
+			t.Fatal("invalid token accepted")
+		}
 	}
 }

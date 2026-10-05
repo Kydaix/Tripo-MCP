@@ -1,39 +1,113 @@
-import {parseSession} from './session.mjs';
+import {parseSession, SessionInputError} from './session.mjs';
 
-const capability = location.hash.slice(1);
-history.replaceState(null, '', '/');
-const form = document.querySelector('#transfer');
-const button = document.querySelector('#submit');
-const status = document.querySelector('#status');
-function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
-if (!capability) { button.disabled = true; message('Lien incomplet. Relance tripo-mcp login et ouvre le lien affiché.', true); }
-form.addEventListener('submit', async event => {
-  event.preventDefault();
-  button.disabled = true;
-  try {
-    const input = parseSession(document.querySelector('#request').value, {
-      authorization: document.querySelector('#authorization').value,
-      device: document.querySelector('#device').value,
-      region: document.querySelector('#region').value,
-      cookie: document.querySelector('#cookie').value
-    });
-    form.reset();
-    message(input.session_cookie ? 'Vérification du renouvellement auprès de Studio…' : 'Vérification du jeton temporaire auprès de Studio…');
-    const response = await fetch('/session', {
-      method: 'POST', cache: 'no-store',
-      headers: {'Content-Type': 'application/json', 'X-Tripo-MCP-Transfer': capability},
-      body: JSON.stringify(input)
-    });
-    if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Transfert refusé ou expiré. Relance tripo-mcp login.');
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error?.message || 'Session refusée.');
-    if (result.renewable) {
-      message(result.session_expires_at
-        ? 'Renouvellement automatique activé. Connexion Studio valable jusqu’au ' + new Date(result.session_expires_at).toLocaleString() + ', sauf révocation. Tu peux fermer le navigateur.'
-        : 'Renouvellement automatique activé tant que la session Studio reste valide. Tu peux fermer le navigateur.');
-    } else {
-      message('Jeton temporaire enregistré jusqu’au ' + new Date(result.expires_at).toLocaleString() + '. Pour activer le renouvellement, relance tripo-mcp login et ajoute le cookie de session.');
+export function connectPage(doc, win) {
+  let capability = win.location.hash.slice(1);
+  win.history.replaceState(null, '', '/');
+  const byID = id => doc.getElementById(id);
+  const form = byID('transfer');
+  const fields = byID('fields');
+  const button = byID('submit');
+  const status = byID('status');
+  const inputs = ['request', 'authorization', 'device', 'region', 'cookie'].map(byID);
+  let pending = false;
+  let completed = false;
+  let controller;
+  function message(text, state = 'error') {
+    status.textContent = text;
+    status.dataset.state = state;
+  }
+  const expired = 'Ce lien est incomplet ou expiré. Relance tripo-mcp login et ouvre le nouveau lien affiché.';
+  if (!/^[A-Za-z0-9_-]{20,128}$/.test(capability)) {
+    capability = '';
+    message(expired);
+  }
+  fields.disabled = !capability;
+  form.addEventListener('input', event => event.target.removeAttribute('aria-invalid'));
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!capability || pending || completed) return;
+    inputs.forEach(input => input.removeAttribute('aria-invalid'));
+    let input;
+    try {
+      input = parseSession(byID('request').value, {
+        authorization: byID('authorization').value,
+        device: byID('device').value,
+        region: byID('region').value,
+        cookie: byID('cookie').value
+      });
+    } catch (error) {
+      message(error instanceof SessionInputError ? error.message : 'Copie la requête Studio ou renseigne les en-têtes manuellement.');
+      const field = byID(error.field || 'request');
+      if (['authorization', 'device', 'region'].includes(field.id)) byID('manual').open = true;
+      field.setAttribute('aria-invalid', 'true');
+      field.focus();
+      return;
     }
-    button.textContent = 'Connecté';
-  } catch (error) { message(error.message || 'Service local arrêté. Relance tripo-mcp login.', true); button.disabled = false; }
-});
+    pending = true;
+    fields.disabled = true;
+    form.setAttribute('aria-busy', 'true');
+    button.textContent = 'Vérification en cours…';
+    message(input.session_cookie ? 'Vérification du renouvellement auprès de Studio…' : 'Vérification du jeton temporaire auprès de Studio…', 'pending');
+    controller = new AbortController();
+    const timeout = win.setTimeout(() => controller.abort(), 65000);
+    try {
+      const response = await win.fetch('/session', {
+        method: 'POST', cache: 'no-store', signal: controller.signal,
+        headers: {'Content-Type': 'application/json', 'X-Tripo-MCP-Transfer': capability},
+        body: JSON.stringify(input)
+      });
+      if (!response.headers.get('content-type')?.includes('application/json')) {
+        if ([403, 409].includes(response.status)) {
+          capability = '';
+          form.reset();
+        }
+        throw new Error(expired);
+      }
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error?.message || 'La connexion a été refusée. Vérifie les données copiées puis réessaie.');
+      if (result.authenticated !== true) throw new Error('Le service local n’a pas confirmé la connexion. Relance tripo-mcp login.');
+      completed = true;
+      capability = '';
+      form.reset();
+      byID('form-content').hidden = true;
+      byID('success').hidden = false;
+      const date = value => {
+        const parsed = new Date(value);
+        return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString('fr-FR') : '';
+      };
+      const until = date(result.renewable ? result.session_expires_at : result.expires_at);
+      byID('success-title').textContent = result.renewable ? 'Connexion établie' : 'Connexion temporaire établie';
+      byID('success-detail').textContent = result.renewable
+        ? 'Renouvellement automatique activé.' + (until ? ' Session valable jusqu’au ' + until + ', sauf révocation par Tripo.' : ' Il reste actif tant que la session Studio est valide.')
+        : (until ? 'Le jeton expire le ' + until + '. ' : '') + 'Pour une connexion renouvelable, relance tripo-mcp login et ajoute le cookie de connexion.';
+      message('', 'success');
+      byID('success').focus();
+    } catch (error) {
+      const text = controller.signal.aborted
+        ? 'La vérification a pris trop de temps. Vérifie la connexion puis réessaie ; aucune donnée saisie n’a été effacée.'
+        : error instanceof TypeError
+          ? 'Le service local est injoignable. Vérifie que tripo-mcp login est toujours ouvert, puis réessaie.'
+          : error.message || 'Transfert interrompu. Réessaie ou relance tripo-mcp login.';
+      message(text);
+      status.focus();
+    } finally {
+      win.clearTimeout(timeout);
+      pending = false;
+      fields.disabled = completed || !capability;
+      form.removeAttribute('aria-busy');
+      button.textContent = 'Vérifier et connecter';
+      input = null;
+    }
+  });
+  win.addEventListener('pagehide', () => {
+    capability = '';
+    controller?.abort();
+    form.reset();
+    fields.disabled = true;
+  });
+  win.addEventListener('pageshow', event => {
+    if (event.persisted && !completed) message(expired);
+  });
+}
+
+if (typeof document !== 'undefined') connectPage(document, window);

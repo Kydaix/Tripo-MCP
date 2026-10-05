@@ -138,3 +138,34 @@ func TestPortalVerifiesRenewableCookieBeforeSaving(t *testing.T) {
 		t.Fatal("secret in portal response")
 	}
 }
+
+func TestCancelledPortalVerificationCannotPersistSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := &portal{root: t.TempDir(), host: "127.0.0.1:12345", capability: "fixture", done: make(chan Status, 1), verify: func(context.Context, Session) error { cancel(); return nil }}
+	b, _ := json.Marshal(map[string]string{"authorization": "Bearer " + token(t, time.Now().Add(time.Hour)), "device_id": "fixture"})
+	r := httptest.NewRequest("POST", "http://"+p.host+"/session", strings.NewReader(string(b))).WithContext(ctx)
+	r.Header.Set("Origin", "http://"+p.host)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Tripo-MCP-Transfer", p.capability)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != 400 || Inspect(p.root).Authenticated || p.completed {
+		t.Fatal("cancelled transfer persisted")
+	}
+}
+
+func TestPortalRejectsConcurrentTransfersImmediately(t *testing.T) {
+	p := &portal{root: t.TempDir(), host: "127.0.0.1:12345", capability: "fixture"}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r := httptest.NewRequest("POST", "http://"+p.host+"/session", strings.NewReader(`{}`))
+	r.Header.Set("Origin", "http://"+p.host)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Tripo-MCP-Transfer", p.capability)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), `"BUSY"`) {
+		t.Fatal("concurrent transfer not rejected")
+	}
+}

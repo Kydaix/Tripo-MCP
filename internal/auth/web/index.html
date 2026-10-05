@@ -1,30 +1,95 @@
 <!doctype html>
 <html lang="fr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connexion · Tripo-MCP</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
-<body><main>
-<p class="brand">TRIPO-MCP <span>CONNEXION LOCALE</span></p>
-<h1>Connecter Tripo Studio</h1>
-<p class="intro">Transfère ta connexion une fois pour renouveler automatiquement les jetons, même navigateur fermé. La session est protégée par Windows sur ce PC.</p>
-<ol>
-<li>Ouvre <a href="https://studio.tripo3d.ai/workspace/generate" target="_blank" rel="noreferrer noopener">Tripo Studio</a> et connecte-toi normalement.</li>
-<li>Ouvre les outils de développement (<kbd>F12</kbd>), onglet <strong>Réseau / Network</strong>. Filtre sur <code>team/list</code>, puis actualise la page.</li>
-<li>Sur la requête <code>api.tripo3d.ai/v2/studio/team/list</code>, choisis <strong>Copier → Copier comme fetch</strong> ou <strong>Copier comme cURL</strong>. Colle le résultat ci-dessous.</li>
-<li>Dans <strong>Application → Cookies</strong> (Chrome, Edge) ou <strong>Stockage → Cookies</strong> (Firefox), sélectionne le domaine Tripo et copie la valeur de <code>ory_kratos_session</code> dans le champ « Cookie de connexion ».</li>
-</ol>
-<form id="transfer" autocomplete="off">
-<label for="request">Requête copiée depuis Studio</label>
-<textarea id="request" rows="5" maxlength="65536" spellcheck="false" autocomplete="off" placeholder="fetch(…) ou curl …"></textarea>
-<p class="hint">La requête collée n’est jamais exécutée. Seuls le jeton de session et les en-têtes Tripo nécessaires sont transmis au service local.</p>
-<label for="cookie">Cookie de connexion <span>(pour le renouvellement automatique)</span></label>
-<input id="cookie" type="password" autocomplete="off" spellcheck="false" maxlength="8220" aria-describedby="cookie-help" placeholder="Valeur de ory_kratos_session">
-<p id="cookie-help" class="hint">Le cookie est vérifié puis chiffré sur ce PC. Sans lui, la connexion reste limitée à la durée du jeton temporaire.</p>
-<details><summary>Renseigner les en-têtes manuellement</summary>
-<label for="authorization">Authorization</label><input id="authorization" type="password" autocomplete="off" placeholder="Bearer …">
-<label for="device">x-tripo-device-id</label><input id="device" autocomplete="off">
-<label for="region">x-tripo-region <span>(facultatif)</span></label><input id="region" autocomplete="off">
-</details>
-<button type="submit" id="submit">Vérifier et connecter</button>
-<p id="status" role="status" aria-live="polite"></p>
-</form>
-<p class="foot">Ne partage ni la requête ni le cookie dans une conversation ou un dépôt. Un nouveau transfert sera nécessaire si Studio expire ou révoque la connexion principale. Le service local s’arrête après le transfert, ou après 15 minutes.</p>
-</main></body></html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion · Tripo-MCP</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <span class="brand">Tripo-MCP</span>
+    <span class="local-label">Connexion sur ce PC</span>
+  </header>
+  <main>
+    <div class="page-heading">
+      <h1>Connecter Tripo Studio</h1>
+      <p>Relie ton abonnement à tes agents. Avec le cookie de connexion, les jetons se renouvellent automatiquement, même navigateur fermé.</p>
+    </div>
+    <div class="connection-layout">
+      <section class="guide" aria-labelledby="guide-title">
+        <h2 id="guide-title">Dans ton navigateur habituel</h2>
+        <p class="guide-intro">Garde cette page ouverte pendant le transfert.</p>
+        <ol class="steps">
+          <li>
+            <h3>Ouvre ta session Studio</h3>
+            <p>Connecte-toi à Tripo avec ton compte habituel.</p>
+            <a class="studio-link" href="https://studio.tripo3d.ai/workspace/generate" target="_blank" rel="noreferrer noopener">Ouvrir Tripo Studio <span class="sr-only">dans un nouvel onglet</span><svg aria-hidden="true" viewBox="0 0 20 20" fill="none"><path d="M7 4h9v9M16 4 4 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          </li>
+          <li>
+            <h3>Copie une requête</h3>
+            <p>Appuie sur <kbd>F12</kbd>, ouvre <strong>Réseau / Network</strong> et filtre sur <code>team/list</code>. Actualise Studio pour afficher la requête.</p>
+            <p>Fais un clic droit sur la requête vers <code>api.tripo3d.ai/v2/studio/team/list</code>, puis <strong>Copier → Copier comme fetch</strong> ou <strong>cURL</strong>.</p>
+          </li>
+          <li>
+            <h3>Copie le cookie de connexion</h3>
+            <p>Dans les outils de développement, ouvre le stockage des cookies du domaine Tripo et copie la valeur de <code>ory_kratos_session</code>.</p>
+            <dl class="browser-help">
+              <div><dt>Chrome / Edge</dt><dd>Application → Cookies</dd></div>
+              <div><dt>Firefox</dt><dd>Stockage → Cookies</dd></div>
+            </dl>
+          </li>
+        </ol>
+      </section>
+      <section class="transfer-panel" aria-labelledby="transfer-title">
+        <div id="form-content">
+          <h2 id="transfer-title">Transférer la connexion</h2>
+          <p class="panel-intro">Les données restent dans ce formulaire jusqu’à leur vérification.</p>
+          <noscript><p class="notice">Active JavaScript pour transférer la connexion vers le service local.</p></noscript>
+          <form id="transfer" autocomplete="off" novalidate>
+            <fieldset id="fields" disabled>
+              <div class="field">
+                <label for="request">Requête copiée</label>
+                <textarea id="request" rows="5" maxlength="65536" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="request-help" placeholder="Colle ici la requête fetch ou cURL…"></textarea>
+                <p id="request-help" class="hint">La commande n’est jamais exécutée. Seuls les en-têtes Tripo nécessaires sont extraits.</p>
+              </div>
+              <div class="field">
+                <label for="cookie">Cookie de connexion <span class="recommended">Recommandé</span></label>
+                <input id="cookie" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="8220" aria-describedby="cookie-help" placeholder="Valeur de ory_kratos_session">
+                <p id="cookie-help" class="hint">Permet le renouvellement automatique. Sans cookie, la connexion expire avec le jeton temporaire.</p>
+              </div>
+              <details id="manual">
+                <summary>Saisir les en-têtes manuellement</summary>
+                <p class="hint">À utiliser si la requête copiée n’est pas reconnue.</p>
+                <div class="field">
+                  <label for="authorization">Authorization</label>
+                  <input id="authorization" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="16384" placeholder="Bearer …">
+                </div>
+                <div class="field">
+                  <label for="device">x-tripo-device-id</label>
+                  <input id="device" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="256">
+                </div>
+                <div class="field">
+                  <label for="region">x-tripo-region <span class="optional">Facultatif</span></label>
+                  <input id="region" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="32">
+                </div>
+              </details>
+              <button type="submit" id="submit">Vérifier et connecter</button>
+            </fieldset>
+          </form>
+        </div>
+        <section id="success" tabindex="-1" aria-labelledby="success-title" hidden>
+          <svg class="success-icon" aria-hidden="true" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/><path d="m9 16 5 5 9-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h2 id="success-title">Connexion établie</h2>
+          <p id="success-detail"></p>
+          <p>Tu peux fermer cette page et reprendre avec ton agent.</p>
+        </section>
+        <p id="status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
+        <p class="privacy-note">Après vérification, la connexion est chiffrée par Windows sur ce PC. Ne partage ni la requête ni le cookie dans un chat ou un dépôt.</p>
+      </section>
+    </div>
+    <footer>Le lien local est valable 15 minutes. Un nouveau transfert sera nécessaire si Tripo expire ou révoque la session principale.</footer>
+  </main>
+</body>
+</html>
