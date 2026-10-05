@@ -69,3 +69,24 @@ func TestCLIParameterFileRejectsNullTrailingAndOversizedInput(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryCommandHelpHandlesZeroFlagValues(t *testing.T) {
+	t.Setenv("TRIPO_MCP_HOME", t.TempDir())
+	for _, command := range []string{"generate", "edit", "export", "import", "attach", "status", "cost", "download", "wait", "jobs", "login"} {
+		var out, errout bytes.Buffer
+		if code := run(context.Background(), []string{command, "--help"}, bytes.NewReader(nil), &out, &errout); code != 0 || strings.Contains(errout.String(), "panic") || !strings.Contains(errout.String(), "Usage") {
+			t.Fatalf("%s: %d %s", command, code, errout.String())
+		}
+	}
+}
+
+func TestDryRunShowsEstimateWithoutSession(t *testing.T) {
+	code, v := cli(t, "generate", "--prompt", "owl", "--dry-run")
+	if code != 0 {
+		t.Fatal(v)
+	}
+	q := v["credits"].(map[string]any)["estimate"].(map[string]any)
+	if q["status"] != "estimated" || q["amount"] != float64(30) {
+		t.Fatal(q)
+	}
+}

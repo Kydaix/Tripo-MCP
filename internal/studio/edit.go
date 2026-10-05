@@ -8,28 +8,29 @@ import (
 )
 
 type EditInput struct {
-	Operation        string   `json:"operation" jsonschema:"texture, upscale, pbr, remesh, segment, fill, complete, rig ou animate."`
-	Prompt           string   `json:"prompt,omitempty" jsonschema:"texture : description des matériaux."`
-	Image            string   `json:"image,omitempty" jsonschema:"texture : référence locale PNG JPEG WebP."`
-	Images           []string `json:"images,omitempty" jsonschema:"texture multivue : avant, gauche, arrière, droite ; chaîne vide pour une vue absente."`
-	StyleImage       string   `json:"style_image,omitempty" jsonschema:"texture : image locale de style, combinable avec le prompt ou les vues."`
-	TextureQuality   string   `json:"texture_quality,omitempty" jsonschema:"texture : standard/detailed/extreme ; upscale : detailed/extreme."`
-	TextureAlignment string   `json:"texture_alignment,omitempty" jsonschema:"texture : original_image ou geometry."`
-	Delight          *bool    `json:"delight,omitempty" jsonschema:"texture : retirer l'éclairage (défaut true)."`
-	Parts            []string `json:"parts,omitempty" jsonschema:"Noms des parties ciblées : toutes par défaut pour texture/remesh ; requis pour fill/complete."`
-	Faces            int      `json:"faces,omitempty" jsonschema:"remesh : budget de polygones."`
-	Quad             bool     `json:"quad,omitempty" jsonschema:"remesh : topologie en quadrangles."`
-	SmartPoly        bool     `json:"smart_poly,omitempty" jsonschema:"remesh : réduction Smart Poly."`
-	Bake             *bool    `json:"bake,omitempty" jsonschema:"remesh : reprojeter les textures (défaut true)."`
-	PartsLevel       string   `json:"parts_level,omitempty" jsonschema:"segment : simple, balanced ou detailed."`
-	RigType          string   `json:"rig_type,omitempty" jsonschema:"rig : auto ou biped ; animate : type de rig existant."`
-	Skeleton         string   `json:"skeleton,omitempty" jsonschema:"rig biped : mixamo, actorcore, unreal, unity ou vrm."`
-	Animations       []string `json:"animations,omitempty" jsonschema:"animate : noms exacts des animations Studio compatibles avec le rig."`
-	MotionAssetID    string   `json:"motion_asset_id,omitempty" jsonschema:"animate : mouvement Studio existant ; exclusif avec animations."`
+	AllowUnverifiedUV bool     `json:"allow_unverified_uv,omitempty" jsonschema:"Texture de modèle importé uniquement : autoriser des UV non inspectables après vérification du dépliage dans un DCC. Ne contourne pas des UV prouvés inutilisables."`
+	Operation         string   `json:"operation" jsonschema:"texture, upscale, pbr, remesh, segment, fill, complete, rig ou animate."`
+	Prompt            string   `json:"prompt,omitempty" jsonschema:"texture : description des matériaux."`
+	Image             string   `json:"image,omitempty" jsonschema:"texture : référence locale PNG JPEG WebP."`
+	Images            []string `json:"images,omitempty" jsonschema:"texture multivue : avant, gauche, arrière, droite ; chaîne vide pour une vue absente."`
+	StyleImage        string   `json:"style_image,omitempty" jsonschema:"texture : image locale de style, combinable avec le prompt ou les vues."`
+	TextureQuality    string   `json:"texture_quality,omitempty" jsonschema:"texture : standard/detailed/extreme ; upscale : detailed/extreme."`
+	TextureAlignment  string   `json:"texture_alignment,omitempty" jsonschema:"texture : original_image ou geometry."`
+	Delight           *bool    `json:"delight,omitempty" jsonschema:"texture : retirer l'éclairage (défaut true)."`
+	Parts             []string `json:"parts,omitempty" jsonschema:"Noms des parties ciblées : toutes par défaut pour texture/remesh ; requis pour fill/complete."`
+	Faces             int      `json:"faces,omitempty" jsonschema:"remesh : budget de polygones."`
+	Quad              bool     `json:"quad,omitempty" jsonschema:"remesh : topologie en quadrangles."`
+	SmartPoly         bool     `json:"smart_poly,omitempty" jsonschema:"remesh : réduction Smart Poly."`
+	Bake              *bool    `json:"bake,omitempty" jsonschema:"remesh : reprojeter les textures (défaut true)."`
+	PartsLevel        string   `json:"parts_level,omitempty" jsonschema:"segment : simple, balanced ou detailed."`
+	RigType           string   `json:"rig_type,omitempty" jsonschema:"rig : auto ou biped ; animate : type de rig existant."`
+	Skeleton          string   `json:"skeleton,omitempty" jsonschema:"rig biped : mixamo, actorcore, unreal, unity ou vrm."`
+	Animations        []string `json:"animations,omitempty" jsonschema:"animate : noms exacts des animations Studio compatibles avec le rig."`
+	MotionAssetID     string   `json:"motion_asset_id,omitempty" jsonschema:"animate : mouvement Studio existant ; exclusif avec animations."`
 }
 
 var editFields = map[string][]string{
-	"texture": {"prompt", "image", "images", "style_image", "texture_quality", "texture_alignment", "delight", "parts"},
+	"texture": {"prompt", "image", "images", "style_image", "texture_quality", "texture_alignment", "delight", "parts", "allow_unverified_uv"},
 	"upscale": {"texture_quality"}, "pbr": {},
 	"remesh": {"faces", "quad", "smart_poly", "bake", "parts"}, "segment": {"parts_level"},
 	"rig": {"rig_type", "skeleton"}, "animate": {"rig_type", "animations", "motion_asset_id"},

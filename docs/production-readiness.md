@@ -29,6 +29,19 @@ Les tests distinguent désormais acceptation, refus, vérification manuelle, ré
 
 Le parcours MCP stdio a ensuite été validé de bout en bout : image PNG → H3.1 standard avec texture, budget demandé de 18 000 triangles → téléchargement du GLB natif (3 130 384 octets, signature et SHA-256 vérifiés). Une seule génération a été soumise, pour un débit mesuré de 30 crédits Studio. Les deux imports de diagnostic précédents n’ont pas débité de crédits.
 
+## Retours d’utilisation — v0.4.0
+
+- Aide CLI : les méthodes `String()` des flags optionnels tolèrent leur valeur zéro. Toutes les aides de sous-commandes passent sans diagnostic de panic.
+- Reprise : un échec prouvé avant soumission redevient exécutable avec le même identifiant et les mêmes paramètres, sur appel explicite. Les conflits, reçus existants, variantes et réponses incertaines restent protégés contre une double dépense.
+- Audit d’image : l’erreur expose le verdict exact, sans inventer une explication que Studio ne fournit pas.
+- Import : un GLB aux UV absents ou entièrement dégénérés est refusé avant envoi, y compris avec `use_original_uv=false`. Les modèles importés sont contrôlés avant texturage, même avec des noms de parties explicites ; les UV non inspectables exigent un atlas source contrôlé ou une vérification extérieure déclarée.
+- Résultats : mesures GLB avant/après, avertissements de changement de dimensions et détection des textures PNG/JPEG intégrées entièrement noires/transparents jusqu’à 4K. Aucun fichier ni résultat distant n’est modifié.
+- Crédits : estimation locale datée avant soumission, historique par `operator_id` après soumission, réservations et remboursements distingués, inconnus explicites. Aucun coût n’est attribué par différence de solde.
+
+Vérifications réelles **sans nouvelle opération payante** : le modèle voxel d’origine présente 18 752 triangles UV, tous sans surface ; son atlas corrigé passe. Les GLB Studio existants confirment le passage de 2 m à 1 m et la texture noire 4K du premier résultat, alors que l’atlas texturé ne déclenche pas ce signalement. Leurs UV sont compressés avec Meshopt : ils sont marqués non vérifiés, pas déclarés valides. L’historique Studio donne 20 crédits pour chacun des deux texturages, 40 pour la génération H3.1 correspondante et 100 pour la P2.0, par opération. Ces données privées ne sont pas utilisées comme fixtures du dépôt.
+
+Les tests synthétiques couvrent UV dégénérés/atlas, texture noire, transformations de nœuds, bornes GLB invalides, validation avant envoi, reprises après redémarrage, ledger paginé, tâches simultanées, remboursements, réservations, historique incomplet et coût inconnu. Aucun dépliage UV automatique ni remboursement Studio n’a été effectué.
+
 ## Limites restantes
 
 Studio n'offre pas de contrat public pour ces interfaces. Une évolution de ses endpoints, des contrôles humains, des droits ou des tarifs peut interrompre le client. Les échecs sont signalés sans basculement vers l'API commerciale ni contournement d'une vérification.

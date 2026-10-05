@@ -39,6 +39,10 @@ func (e *Engine) Import(ctx context.Context, in ImportRequest) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	inspection := studio.InspectModel(params.ModelFile, false)
+	if err = studio.CheckTextureUV(inspection); err != nil {
+		return View{}, err
+	}
 	s, c, err := e.client(ctx)
 	if err != nil {
 		return View{}, err
@@ -61,6 +65,10 @@ func (e *Engine) Import(ctx context.Context, in ImportRequest) (View, error) {
 	if exists {
 		return j.View(), nil
 	}
+	j.ImportInfo = &studio.ImportInfo{UseOriginalUV: *params.UseOriginalUV, Source: inspection}
+	j.UVSourceVerified = *params.UseOriginalUV && inspection.UVStatus == "checked"
+	j.Warnings = studio.ImportWarnings(*params.UseOriginalUV)
+	j.Credits = &studio.Credits{Estimate: studio.EstimateImport()}
 	model, err := c.UploadModel(ctx, params.ModelFile)
 	if err != nil {
 		return e.failPreparing(&j, err)
@@ -73,6 +81,7 @@ func (e *Engine) Import(ctx context.Context, in ImportRequest) (View, error) {
 		return e.failPreparing(&j, fault.New("INPUT_CHANGED", "Le modèle a changé pendant l'envoi ; import non soumis."))
 	}
 	j.State = "outcome_unknown"
+	j.Retryable = false
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}

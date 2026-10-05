@@ -34,7 +34,7 @@ Quatre modes d’entrée exclusifs :
 - `images` : quatre chemins avant/gauche/arrière/droite ; chaîne vide pour un emplacement absent, avant et au moins une autre vue requis. CLI : quatre occurrences de `--view`, ou `--params` pour les emplacements vides.
 - `batch_images` : chemins d’images indépendantes. CLI : occurrences de `--batch-image`. Limite locale de 100 images, soumise aussi aux limites du compte.
 
-Le téléversement est suivi de l’audit d’image de Studio. Son verdict `pass` est conservé dans la demande de génération ou de texture. `reject` produit `IMAGE_REJECTED` ; les images signalées `sensitive` ou `nsfw` demandent une vérification dans Studio (`IMAGE_REVIEW_REQUIRED`). Un verdict absent ou inconnu produit `PROTOCOL_CHANGED`, sans soumission payante. Les tâches qui ont déjà échoué pendant cet audit ne sont pas rejouées automatiquement après une mise à jour : utiliser un nouvel identifiant uniquement après avoir vérifié l’échec avant soumission.
+Le téléversement est suivi de l’audit d’image de Studio. Son verdict `pass` est conservé dans la demande de génération ou de texture. `reject` produit `IMAGE_REJECTED` avec le verdict exact et indique qu’aucun motif détaillé n’a été fourni ; les images signalées `sensitive` ou `nsfw` demandent une vérification dans Studio (`IMAGE_REVIEW_REQUIRED`). Un verdict absent ou inconnu produit `PROTOCOL_CHANGED`, sans soumission payante. Une tâche `retryable: true` peut être reprise par une nouvelle demande explicite avec le même identifiant et les mêmes entrées. Un résultat de soumission incertain n’est jamais rejoué.
 
 Le budget minimal est de 500 polygones, ou 10 000 en génération de parties. Maximum HD : 1 million de triangles en standard, 2 millions en H3.1 Ultra, 50 000 quadrangles. Smart Poly HD : 20 000 triangles / 10 000 quadrangles. P2 : 50 000 triangles / 25 000 quadrangles. P1 : 20 000.
 
@@ -62,6 +62,10 @@ Chaque édition agit sur la version courante du projet ; une source plus ancienn
 ## Import et export
 
 `tripo_import_model` accepte `model_file`, `name`, `use_original_uv` et `transform` (matrice 4×4 column-major, identité par défaut). Formats : GLB, FBX, OBJ, STL. Limite locale 100 Mo. Les dépendances externes d’un OBJ/FBX ne sont pas téléversées.
+
+Le contrat officiel envoie bien `use_original_uv`, y compris `false`. Le serveur ne garantit cependant pas leur reconstruction. Les GLB dont les UV sont absents ou tous sans surface sont refusés localement avec `UV_UNUSABLE`, avant import. Le contrôle est renouvelé sur le résultat avant texture. Si la compression empêche l’inspection et qu’aucun atlas source contrôlé n’est conservé, `UV_UNVERIFIED` demande une vérification dans un DCC ; `allow_unverified_uv` permet ensuite de déclarer cette vérification pour `texture`. Ce champ local n’est jamais envoyé à Studio. La normalisation possible de l’échelle est annoncée dans les avertissements d’import ; le client ne restaure pas les dimensions.
+
+`tripo_estimate` et `--dry-run` utilisent les valeurs et formules de `BOQlA7aJ.js`, `D2TK3lHS.js` et `d0-kdlow.js`. Les montants sont des estimations datées, hors remises/quotas. `tripo_cost` / `cost JOB` lit `/v2/studio/txn/records?page_num=N&page_size=100`, comme Studio, et sélectionne uniquement les lignes de l’opération. Les statuts, débits et remboursements sont conservés sans attribuer les variations globales du portefeuille à une tâche.
 
 `tripo_export` accepte `format` (GLB, FBX, OBJ, STL, 3MF, USDZ), `texture_size` (512/1024/2048/4096/8192), `packaging` (embedded/zip), `pack_uv`, `vertex_colors` (OBJ), `fbx_preset`, `with_animation`, `animations`, `animate_in_place`, `bake_animation` et `bake_frame`. L’orientation Studio `-y` et le nom technique `model` sont fixes ; le nom du fichier local se choisit avec `download --out`.
 

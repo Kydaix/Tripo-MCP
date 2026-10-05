@@ -50,7 +50,7 @@ tripo-mcp download hibou-fbx-001 --out C:\Models\hibou.fbx
 
 Une image locale PNG, JPEG ou WebP de 20 Mo maximum peut remplacer le prompt avec `--image C:\Images\reference.png`.
 
-Par défaut : H3.1, 20 000 triangles, textures standard 2K, visibilité privée. `--dry-run` valide les paramètres et les fichiers localement ; ce n’est pas un devis de crédits. `tripo-mcp capabilities` donne le catalogue et `generate --help` liste les options.
+Par défaut : H3.1, 20 000 triangles, textures standard 2K, visibilité privée. `--dry-run` valide les paramètres et les fichiers localement et ajoute `credits.estimate`, une estimation datée du barème Studio, pas un devis garanti. Un coût non vérifié reste `unknown`. `tripo-mcp capabilities` donne le catalogue et `generate --help` liste les options.
 
 Les contrôles du générateur Studio sont exposés : modèles H2.5/H3.0/H3.1 et Smart Mesh P1.0/P2.0, Ultra Mesh Quality, AI Complete, triangles/quadrangles, budget de polygones, génération en parties avec niveau de détail, textures 2K/4K/8K, PBR, retrait d’éclairage, alignement, pose en T et visibilité. Les entrées peuvent être un texte, une image, quatre emplacements multivues ou un lot d’images indépendantes.
 
@@ -83,6 +83,12 @@ Les opérations `texture`, `upscale`, `pbr`, `remesh`, `segment`, `fill`, `compl
 
 Pour un modèle local : `tripo-mcp import --model-file C:\Models\objet.glb --request-id objet-import --yes`, puis attendre et utiliser cette tâche avec `edit`. Formats d’entrée : GLB, FBX, OBJ et STL ; limite locale de 100 Mo. Un OBJ doit contenir sa géométrie ; les fichiers MTL et textures annexes ne sont pas téléversés. Pour un projet déjà présent dans Studio : `tripo-mcp attach --project-id ID --request-id objet-existant` (lecture distante seule).
 
+**UV et dimensions :** `use_original_uv: false` est bien envoyé à Studio, mais ne garantit pas un nouveau dépliage. Un GLB dont les UV sont absents ou entièrement dégénérés est refusé avant import (`UV_UNUSABLE`), même avec ce réglage. Fournir un atlas UV valide et conserver `use_original_uv: true`. Avant de texturer un modèle importé, le client contrôle aussi le fichier renvoyé par Studio, même si `parts` est renseigné. Si les UV ne sont pas inspectables (Meshopt/Draco/FBX), un atlas source contrôlé et conservé permet de continuer ; sinon le client retourne `UV_UNVERIFIED`. Après vérification dans un DCC, `allow_unverified_uv: true` (`--allow-unverified-uv`) autorise ce cas. Cette option ne contourne jamais des UV prouvés inutilisables.
+
+Studio peut normaliser les dimensions à l’import. Les nouvelles tâches conservent les dimensions GLB d’origine dans `import_info.source.dimensions_m` ; le téléchargement expose celles du résultat dans `inspection.dimensions_m` et signale un écart supérieur à 1 %. Aucune correction d’échelle automatique n’est appliquée. Les dimensions proviennent des positions ou des bornes glTF transformées par les nœuds, sans animation ni morph ; la matrice d’import personnalisée n’est pas appliquée aux mesures du fichier source.
+
+Le téléchargement distingue le succès distant et les contrôles locaux : `inspection` signale notamment une texture de couleur entièrement noire/transparente. Ce contrôle porte sur les PNG/JPEG intégrés jusqu’à 4K. Les textures plus grandes, WebP, KTX2 et les autres formats restent non vérifiés. L’inspection des UV porte sur les GLB non compressés jusqu’à 100 Mo ; elle ne valide pas tous les chevauchements ou la qualité artistique du résultat. Le fichier est conservé tel quel, y compris lorsqu’un avertissement est présent.
+
 Les exports proposent GLB, FBX, OBJ, STL, 3MF et USDZ, textures de 512 à 8192 pixels, packaging intégré ou ZIP, regroupement UV, presets FBX et options d’animation. Une archive ZIP est téléchargée telle quelle, sans extraction automatique. Son chemin de sortie doit finir en `.zip`.
 
 La [correspondance détaillée des paramètres](docs/studio-controls.md) précise les limites et les fonctions qui restent dans l’éditeur visuel.
@@ -112,6 +118,8 @@ Serveur stdio : `tripo-mcp mcp`. Exemple de configuration :
 |---|---|
 | `tripo_status` | Connexion, abonnement et crédits Studio |
 | `tripo_capabilities` | Modèles, réglages, bornes et limites locales |
+| `tripo_estimate` | Estimation locale ; fournir un seul objet `generate`, `edit`, `export` ou `import` |
+| `tripo_cost` | Facturation réelle d’une tâche, liée à son opération Studio |
 | `tripo_generate` | Génération HD/Smart Mesh, texte/image/multivues/lots et variantes |
 | `tripo_edit` | Texture, upscale, PBR, remesh, segmentation, fermeture/complétion de parties, rigging et animation |
 | `tripo_import_model` | Téléversement d’un modèle local dans Studio |
@@ -125,11 +133,19 @@ Les opérations payantes et l’import exigent un `request_id` stable et `confir
 
 ## Crédits et interruptions
 
-Le moteur verrouille le journal et enregistre l’intention avant chaque requête payante. Réutiliser un identifiant avec les mêmes paramètres renvoie la tâche existante. Des paramètres différents provoquent `REQUEST_CONFLICT`.
+Le moteur verrouille le journal et enregistre l’intention avant chaque requête payante. Réutiliser un identifiant avec les mêmes paramètres renvoie la tâche existante. Si `retryable: true`, une nouvelle demande explicite reprend la préparation : le journal prouve qu’aucune opération n’a encore été envoyée. Cela couvre aussi les anciens faux rejets d’image. Aucun lancement n’est fait en arrière-plan. Des paramètres ou fichiers différents provoquent `REQUEST_CONFLICT`.
 
 Une réponse incertaine produit `outcome_unknown` : vérifier l’historique Studio avant toute nouvelle soumission. Le journal empêche les resoumissions automatiques sur ce poste ; il ne garantit pas une exécution exactement une fois entre plusieurs postes.
 
 Les exports peuvent consommer des crédits. Aucun coût fixe n’est garanti. `--yes` autorise l’opération, ce n’est pas un plafond de facturation.
+
+```powershell
+tripo-mcp generate --prompt "Un hibou" --dry-run
+tripo-mcp edit modele --operation texture --prompt "Bronze" --texture-quality detailed --dry-run
+tripo-mcp cost modele-texture
+```
+
+Les estimations viennent du barème affiché dans l’application Studio du 5 octobre 2026. Elles excluent les remises et quotas gratuits ; les variantes P2 multiples, imports, exports et certains traitements restent `unknown`. La fin d’une tâche récupère automatiquement `credits.actual` dans `/v2/studio/txn/records`, par `operator_id`, sans différence de solde global. `cost JOB` / `tripo_cost` actualise aussi les anciennes tâches et les remboursements ultérieurs. Les variantes possèdent chacune leur coût ; le parent n’invente pas de total. Seules les lignes `fulfilled` alimentent `charged`, `refunded` et `net` ; les réservations `pending` et annulations restent visibles. Une lecture impossible, un reçu absent, une ligne introuvable ou un historique dépassant 2 000 lignes restent explicitement inconnus/incomplets, jamais assimilés à un coût nul. Les lectures de coûts ne changent pas le succès de la tâche et ne la relancent pas.
 
 Codes de sortie : `0` commande réussie, `1` erreur, `2` paramètres/autorisation manquants, `3` connexion requise, `4` crédits insuffisants, `5` résultat incertain. Lire aussi l’état retourné : une consultation réussie peut décrire une génération échouée.
 

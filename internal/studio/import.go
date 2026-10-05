@@ -10,8 +10,16 @@ import (
 type ImportInput struct {
 	ModelFile     string    `json:"model_file" jsonschema:"Chemin absolu GLB, FBX, OBJ ou STL ; limite locale 100 Mo."`
 	Name          string    `json:"name,omitempty"`
-	UseOriginalUV *bool     `json:"use_original_uv,omitempty" jsonschema:"Conserver les UV existants ; défaut true."`
+	UseOriginalUV *bool     `json:"use_original_uv,omitempty" jsonschema:"Conserver les UV existants ; défaut true. false demande une reconstruction à Studio sans garantie ; contrôle du GLB renvoyé avant texturage."`
 	Transform     []float64 `json:"transform,omitempty" jsonschema:"Matrice 4x4 column-major ; identité par défaut."`
+}
+
+func ImportWarnings(original bool) []string {
+	warnings := []string{"Studio peut normaliser les dimensions à l'import (ex. 2 m → 1 m). Vérifier inspection.dimensions_m au téléchargement ; aucune restauration d'échelle automatique."}
+	if !original {
+		warnings = append(warnings, "use_original_uv=false est envoyé à Studio, mais ne garantit pas de nouveaux UV. Le GLB renvoyé sera contrôlé avant texturage ; fournir un atlas UV valide reste la solution fiable.")
+	}
+	return warnings
 }
 
 func (in ImportInput) Normalize() (ImportInput, error) {

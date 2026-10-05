@@ -31,6 +31,7 @@ const usage = `Tripo-MCP — crédits de l'abonnement Tripo Studio, sans clé AP
   tripo-mcp generate --image C:\image.png --yes [--request-id ID]
   tripo-mcp generate --prompt "..." --dry-run
   tripo-mcp capabilities         Modèles, réglages et limites pris en charge
+  tripo-mcp cost JOB             Crédits réellement facturés pour cette opération (lecture seule)
   tripo-mcp edit JOB --operation texture --prompt "..." --yes
   tripo-mcp edit JOB --operation remesh --faces 5000 --quad --yes
   tripo-mcp import --model-file C:\model.glb --request-id imported-001 --yes
@@ -79,7 +80,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 	f.SetOutput(errout)
 	_ = f.Bool("json", false, "sortie JSON")
 	yes := f.Bool("yes", false, "autoriser cette opération sur les crédits Studio")
-	dry := f.Bool("dry-run", false, "valider les paramètres sans requête")
+	dry := f.Bool("dry-run", false, "valider les paramètres et estimer le tarif, sans requête")
 	noOpen := f.Bool("no-open", false, "afficher le lien local sans ouvrir le navigateur")
 	var generation studio.GenerateInput
 	var edit studio.EditInput
@@ -145,7 +146,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 	if invalidFlag != "" {
 		return report(out, nil, fault.New("INVALID_ARGUMENT", "Option --"+invalidFlag+" incompatible avec cette commande."))
 	}
-	if id != "" && args[0] != "status" && args[0] != "doctor" && args[0] != "wait" && args[0] != "download" && args[0] != "export" && args[0] != "edit" {
+	if id != "" && args[0] != "cost" && args[0] != "status" && args[0] != "doctor" && args[0] != "wait" && args[0] != "download" && args[0] != "export" && args[0] != "edit" {
 		return report(out, nil, fault.New("INVALID_ARGUMENT", "Cette commande n'accepte pas d'identifiant positionnel."))
 	}
 	if *paramsFile != "" {
@@ -208,6 +209,8 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		}
 	case "jobs":
 		result, err = e.List()
+	case "cost":
+		result, err = e.Costs(ctx, id)
 	case "capabilities":
 		result = studio.Capabilities()
 	case "attach":
@@ -264,6 +267,31 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		}
 	default:
 		err = fault.New("INVALID_ARGUMENT", "Commande inconnue ; tripo-mcp help.")
+	}
+	if *dry && err == nil {
+		var quote *studio.Estimate
+		switch args[0] {
+		case "generate":
+			quote = studio.EstimateGeneration(generation)
+		case "edit":
+			quote = studio.EstimateEdit(edit)
+		case "export":
+			quote = studio.EstimateExport(export)
+		case "import":
+			quote = studio.EstimateImport()
+		}
+		b, _ := json.Marshal(result)
+		var preview map[string]any
+		_ = json.Unmarshal(b, &preview)
+		preview["credits"] = &studio.Credits{Estimate: quote}
+		if args[0] == "import" {
+			normalized := result.(studio.ImportInput)
+			preview["warnings"] = studio.ImportWarnings(*normalized.UseOriginalUV)
+			inspection := studio.InspectModel(normalized.ModelFile, false)
+			preview["inspection"] = inspection
+			err = studio.CheckTextureUV(inspection)
+		}
+		result = preview
 	}
 	return report(out, result, err)
 }
