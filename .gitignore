@@ -1,0 +1,10 @@
+/dist/
+*.exe
+*.test
+*.log
+.env*
+/session*
+profile/
+jobs/
+downloads/
+.playwright*/

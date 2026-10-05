@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connexion · Tripo-MCP</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body><main>
+<p class="brand">TRIPO-MCP <span>CONNEXION LOCALE</span></p>
+<h1>Connecter Tripo Studio</h1>
+<p class="intro">Utilise ton navigateur habituel. La session est transférée sur ce PC, puis protégée par Windows.</p>
+<ol>
+<li>Ouvre <a href="https://studio.tripo3d.ai/workspace/generate" target="_blank" rel="noreferrer noopener">Tripo Studio</a> et connecte-toi normalement.</li>
+<li>Ouvre les outils de développement (<kbd>F12</kbd>), onglet <strong>Réseau / Network</strong>. Filtre sur <code>team/list</code>, puis actualise la page.</li>
+<li>Sur la requête <code>api.tripo3d.ai/v2/studio/team/list</code>, choisis <strong>Copier → Copier comme fetch</strong> ou <strong>Copier comme cURL</strong>. Colle le résultat ci-dessous.</li>
+</ol>
+<form id="transfer" autocomplete="off">
+<label for="request">Requête copiée depuis Studio</label>
+<textarea id="request" rows="5" maxlength="65536" spellcheck="false" autocomplete="off" placeholder="fetch(…) ou curl …"></textarea>
+<p class="hint">La requête collée n’est jamais exécutée. Seuls le jeton de session et les en-têtes Tripo nécessaires sont transmis au service local.</p>
+<details><summary>Renseigner les en-têtes manuellement</summary>
+<label for="authorization">Authorization</label><input id="authorization" type="password" autocomplete="off" placeholder="Bearer …">
+<label for="device">x-tripo-device-id</label><input id="device" autocomplete="off">
+<label for="region">x-tripo-region <span>(facultatif)</span></label><input id="region" autocomplete="off">
+</details>
+<button type="submit" id="submit">Vérifier et connecter</button>
+<p id="status" role="status" aria-live="polite"></p>
+</form>
+<p class="foot">Ne partage pas cette requête dans une conversation ou un dépôt. À l’expiration de la session, relance <code>tripo-mcp login</code>. Cette page se ferme côté service après le transfert, ou après 15 minutes.</p>
+</main></body></html>
