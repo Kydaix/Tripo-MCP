@@ -30,6 +30,11 @@ const usage = `Tripo-MCP — crédits de l'abonnement Tripo Studio, sans clé AP
   tripo-mcp generate --prompt "..." --yes [--request-id ID] [--faces 20000]
   tripo-mcp generate --image C:\image.png --yes [--request-id ID]
   tripo-mcp generate --prompt "..." --dry-run
+  tripo-mcp capabilities         Modèles, réglages et limites pris en charge
+  tripo-mcp edit JOB --operation texture --prompt "..." --yes
+  tripo-mcp edit JOB --operation remesh --faces 5000 --quad --yes
+  tripo-mcp import --model-file C:\model.glb --request-id imported-001 --yes
+  tripo-mcp attach --project-id ID --request-id existing-001
   tripo-mcp jobs                 Tâches connues, sans accès réseau
   tripo-mcp wait JOB             Attendre une tâche ; Ctrl+C ne l'annule pas chez Tripo
   tripo-mcp download JOB [--out C:\model.glb]
@@ -76,15 +81,26 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 	yes := f.Bool("yes", false, "autoriser cette opération sur les crédits Studio")
 	dry := f.Bool("dry-run", false, "valider les paramètres sans requête")
 	noOpen := f.Bool("no-open", false, "afficher le lien local sans ouvrir le navigateur")
-	prompt := f.String("prompt", "", "description")
-	image := f.String("image", "", "image locale")
-	model := f.String("model", "", "version Studio")
-	faces := f.Int("faces", 20000, "budget de faces")
-	noTexture := f.Bool("no-texture", false, "géométrie sans texture")
-	visibility := f.String("visibility", "private", "private, shareable ou public")
+	var generation studio.GenerateInput
+	var edit studio.EditInput
+	var export studio.ExportOptions
+	var imported studio.ImportInput
+	projectID := f.String("project-id", "", "projet Studio existant (attach)")
+	switch args[0] {
+	case "generate":
+		generationFlags(f, &generation)
+	case "edit":
+		editFlags(f, &edit)
+	case "export":
+		exportFlags(f, &export)
+	case "import":
+		f.StringVar(&imported.ModelFile, "model-file", "", "modèle local")
+		f.StringVar(&imported.Name, "name", "", "nom du modèle")
+		f.Var(optionalBool{&imported.UseOriginalUV}, "use-original-uv", "conserver les UV ; défaut true")
+	}
+	paramsFile := f.String("params", "", "fichier JSON de paramètres ; exclusif avec les options métier")
 	requestID := f.String("request-id", "", "identifiant stable de demande")
 	dest := f.String("out", "", "chemin du fichier")
-	format := f.String("format", "glb", "glb ou fbx")
 	timeout := f.Duration("timeout", 20*time.Minute, "durée maximale d'attente")
 	// Positional IDs may precede flags, like `download ID --out file`.
 	rest := args[1:]
@@ -105,8 +121,64 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		return report(out, nil, fault.New("INVALID_ARGUMENT", "Arguments positionnels inattendus."))
 	}
 	var result any
-	if id != "" && args[0] != "status" && args[0] != "doctor" && args[0] != "wait" && args[0] != "download" && args[0] != "export" {
+	invalidFlag := ""
+	f.Visit(func(v *flag.Flag) {
+		allowed := true
+		switch v.Name {
+		case "project-id":
+			allowed = args[0] == "attach"
+		case "no-open":
+			allowed = args[0] == "login"
+		case "out":
+			allowed = args[0] == "download"
+		case "timeout":
+			allowed = args[0] == "wait"
+		case "yes":
+			allowed = args[0] == "generate" || args[0] == "edit" || args[0] == "export" || args[0] == "import"
+		case "request-id":
+			allowed = args[0] == "generate" || args[0] == "edit" || args[0] == "export" || args[0] == "import" || args[0] == "attach"
+		}
+		if !allowed {
+			invalidFlag = v.Name
+		}
+	})
+	if invalidFlag != "" {
+		return report(out, nil, fault.New("INVALID_ARGUMENT", "Option --"+invalidFlag+" incompatible avec cette commande."))
+	}
+	if id != "" && args[0] != "status" && args[0] != "doctor" && args[0] != "wait" && args[0] != "download" && args[0] != "export" && args[0] != "edit" {
 		return report(out, nil, fault.New("INVALID_ARGUMENT", "Cette commande n'accepte pas d'identifiant positionnel."))
+	}
+	if *paramsFile != "" {
+		conflict := false
+		f.Visit(func(v *flag.Flag) {
+			switch v.Name {
+			case "params", "yes", "request-id", "dry-run", "json":
+			default:
+				conflict = true
+			}
+		})
+		if conflict {
+			return report(out, nil, fault.New("INVALID_ARGUMENT", "--params est exclusif avec les options métier."))
+		}
+		var target any
+		switch args[0] {
+		case "generate":
+			target = &generation
+		case "edit":
+			target = &edit
+		case "export":
+			target = &export
+		case "import":
+			target = &imported
+		default:
+			return report(out, nil, fault.New("INVALID_ARGUMENT", "--params nécessite generate, edit ou export."))
+		}
+		if err = readParams(*paramsFile, target); err != nil {
+			return report(out, nil, fault.New("INVALID_ARGUMENT", "Fichier de paramètres JSON invalide ou champ inconnu."))
+		}
+	}
+	if *dry && args[0] != "generate" && args[0] != "edit" && args[0] != "export" && args[0] != "import" {
+		return report(out, nil, fault.New("INVALID_ARGUMENT", "--dry-run nécessite generate, edit, export ou import."))
 	}
 	switch args[0] {
 	case "login":
@@ -136,18 +208,22 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		}
 	case "jobs":
 		result, err = e.List()
+	case "capabilities":
+		result = studio.Capabilities()
+	case "attach":
+		result, err = e.Attach(ctx, engine.AttachRequest{ProjectID: *projectID, RequestID: *requestID})
+	case "import":
+		if *dry {
+			result, err = imported.Normalize()
+		} else {
+			result, err = e.Import(ctx, engine.ImportRequest{ImportInput: imported, RequestID: *requestID, Confirm: *yes})
+		}
 	case "generate":
-		params := engine.GenerateRequest{RequestID: *requestID, Confirm: *yes}
-		params.Prompt = *prompt
-		params.Image = *image
-		params.Model = *model
-		params.Faces = *faces
-		params.NoTexture = *noTexture
-		params.Visibility = *visibility
+		params := engine.GenerateRequest{GenerateInput: generation, RequestID: *requestID, Confirm: *yes}
 		if *dry {
 			result, err = params.GenerateInput.Normalize()
-			if err == nil && params.Image != "" {
-				_, err = studio.ValidateImage(params.Image)
+			if err == nil {
+				err = validateImages(generation.FilePaths())
 			}
 		} else {
 			result, err = e.Generate(ctx, params)
@@ -163,7 +239,20 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 	case "download":
 		result, err = e.Download(ctx, id, *dest)
 	case "export":
-		result, err = e.Export(ctx, engine.ExportRequest{JobID: id, RequestID: *requestID, Format: *format, Confirm: *yes})
+		if *dry {
+			result, err = export.Normalize()
+		} else {
+			result, err = e.Export(ctx, engine.ExportRequest{ExportOptions: export, JobID: id, RequestID: *requestID, Confirm: *yes})
+		}
+	case "edit":
+		if *dry {
+			result, err = edit.Normalize()
+			if err == nil {
+				err = validateImages(edit.FilePaths())
+			}
+		} else {
+			result, err = e.Edit(ctx, engine.EditRequest{EditInput: edit, JobID: id, RequestID: *requestID, Confirm: *yes})
+		}
 	case "session-import":
 		// Migration channel: stdin only, never arguments, files in a repository, or MCP tool input.
 		var s auth.Session
@@ -177,6 +266,17 @@ func run(ctx context.Context, args []string, in io.Reader, out, errout io.Writer
 		err = fault.New("INVALID_ARGUMENT", "Commande inconnue ; tripo-mcp help.")
 	}
 	return report(out, result, err)
+}
+
+func validateImages(paths []string) error {
+	for _, p := range paths {
+		if p != "" {
+			if _, err := studio.ValidateImage(p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func report(out io.Writer, result any, err error) int {

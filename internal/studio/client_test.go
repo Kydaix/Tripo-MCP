@@ -36,7 +36,7 @@ func TestExportAndResolutionContracts(t *testing.T) {
 	defer srv.Close()
 	c := New(auth.Session{Token: "fixture"})
 	c.BaseURL = srv.URL
-	r, _, err := c.Export(context.Background(), ExportInput{Format: "glb", Project: "project-1"})
+	r, _, err := c.Export(context.Background(), ExportInput{ExportOptions: ExportOptions{Format: "glb"}, Project: "project-1"})
 	if err != nil || r.OperatorID != "export-1" {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -46,12 +47,15 @@ func assetURL(raw string) (*url.URL, error) {
 // Download never sends session headers to storage. Files are committed only after validation.
 func Download(ctx context.Context, raw, destination, format string) (Artifact, error) {
 	var result Artifact
-	if format != "glb" && format != "fbx" {
-		return result, fault.New("INVALID_ARGUMENT", "Format attendu : glb ou fbx.")
+	if !oneOf(format, "glb", "fbx", "zip", "stl", "3mf", "usdz") {
+		return result, fault.New("INVALID_ARGUMENT", "Format de téléchargement non pris en charge.")
 	}
 	u, err := assetURL(raw)
 	if err != nil {
 		return result, err
+	}
+	if !strings.EqualFold(filepath.Ext(destination), "."+format) {
+		return result, invalid("L'extension de sortie doit correspondre au format " + format + ".")
 	}
 	destination, err = filepath.Abs(destination)
 	if err != nil {
@@ -139,14 +143,45 @@ func Download(ctx context.Context, raw, destination, format string) (Artifact, e
 }
 
 func ValidateModel(r io.Reader, size int64, format string) error {
-	var header [32]byte
+	var header [84]byte
 	n, _ := io.ReadFull(r, header[:])
 	if format == "glb" {
 		if n < 20 || string(header[:4]) != "glTF" || binary.LittleEndian.Uint32(header[4:8]) != 2 || int64(binary.LittleEndian.Uint32(header[8:12])) != size {
 			return fault.New("INVALID_ASSET", "Le résultat n'est pas un fichier GLB 2 complet.")
 		}
-	} else if n < 23 || (!strings.HasPrefix(string(header[:]), "Kaydara FBX Binary") && !strings.HasPrefix(string(header[:]), "; FBX")) {
+	} else if format == "fbx" && (n < 23 || (!strings.HasPrefix(string(header[:]), "Kaydara FBX Binary") && !strings.HasPrefix(string(header[:]), "; FBX"))) {
 		return fault.New("INVALID_ASSET", "Le résultat n'est pas un fichier FBX reconnu.")
+	} else if format == "zip" || format == "3mf" || format == "usdz" {
+		at, ok := r.(io.ReaderAt)
+		if !ok {
+			return fault.New("INVALID_ASSET", "Archive non vérifiable.")
+		}
+		archive, err := zip.NewReader(at, size)
+		if err != nil || len(archive.File) == 0 || len(archive.File) > 10000 {
+			return fault.New("INVALID_ASSET", "Archive de modèle invalide.")
+		}
+		found := false
+		for _, f := range archive.File {
+			name := strings.ToLower(f.Name)
+			switch format {
+			case "3mf":
+				found = found || strings.HasSuffix(name, ".model")
+			case "usdz":
+				found = found || oneOf(filepath.Ext(name), ".usd", ".usdc", ".usda")
+			case "zip":
+				found = found || oneOf(filepath.Ext(name), ".glb", ".gltf", ".fbx", ".obj", ".stl", ".3mf", ".usd", ".usdc", ".usda", ".usdz")
+			}
+		}
+		if !found {
+			return fault.New("INVALID_ASSET", "L'archive ne contient pas de modèle reconnu.")
+		}
+	} else if format == "stl" {
+		binaryOK := n >= 84 && 84+int64(binary.LittleEndian.Uint32(header[80:84]))*50 == size
+		if !binaryOK && !strings.HasPrefix(strings.TrimSpace(string(header[:n])), "solid") {
+			return fault.New("INVALID_ASSET", "Fichier STL non reconnu.")
+		}
+	} else if !oneOf(format, "glb", "fbx") {
+		return fault.New("INVALID_ASSET", "Format non vérifiable.")
 	}
 	return nil
 }

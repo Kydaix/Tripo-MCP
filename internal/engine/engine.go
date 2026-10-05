@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Kydaix/Tripo-MCP/internal/auth"
@@ -27,6 +29,7 @@ type Engine struct {
 func New(root string) *Engine { return &Engine{Root: root, Client: studio.New} }
 
 type Job struct {
+	Variants    []Job            `json:"variants,omitempty"`
 	ID          string           `json:"id"`
 	Kind        string           `json:"kind"`
 	State       string           `json:"state"`
@@ -44,6 +47,8 @@ type Job struct {
 
 // View is the public job representation; credentials, URLs and internal identity never escape.
 type View struct {
+	Format     string           `json:"format,omitempty"`
+	Variants   []View           `json:"variants,omitempty"`
 	ID         string           `json:"job_id"`
 	Kind       string           `json:"kind"`
 	State      string           `json:"state"`
@@ -56,7 +61,14 @@ type View struct {
 }
 
 func (j Job) View() View {
-	return View{ID: j.ID, Kind: j.Kind, State: j.State, ProjectID: j.Receipt.ProjectID, OperatorID: j.Receipt.OperatorID, Progress: j.Progress, CreatedAt: j.CreatedAt, Error: j.Error, Artifact: j.Artifact}
+	v := View{ID: j.ID, Kind: j.Kind, State: j.State, ProjectID: j.Receipt.ProjectID, OperatorID: j.Receipt.OperatorID, Progress: j.Progress, CreatedAt: j.CreatedAt, Error: j.Error, Artifact: j.Artifact}
+	if j.Artifact != nil {
+		v.Format = j.Artifact.Format
+	}
+	for _, child := range j.Variants {
+		v.Variants = append(v.Variants, child.View())
+	}
+	return v
 }
 
 func (e *Engine) client(ctx context.Context) (auth.Session, *studio.Client, error) {
@@ -67,16 +79,39 @@ func (e *Engine) client(ctx context.Context) (auth.Session, *studio.Client, erro
 	return s, e.Client(s), nil
 }
 func (e *Engine) save(j *Job) error {
-	p, err := local.JobPath(e.Root, j.ID)
+	base, index, err := splitJobID(j.ID)
+	if err != nil {
+		return err
+	}
+	p, err := local.JobPath(e.Root, base)
 	if err != nil {
 		return err
 	}
 	j.UpdatedAt = time.Now().UTC()
+	if index > 0 {
+		parent, err := e.read(base)
+		if err != nil {
+			return err
+		}
+		if index > len(parent.Variants) {
+			return fault.New("JOB_NOT_FOUND", "Variante introuvable.")
+		}
+		parent.Variants[index-1] = *j
+		if parent.Error == nil || parent.Error.Code != "OUTCOME_UNKNOWN" {
+			aggregate(&parent)
+		}
+		parent.UpdatedAt = j.UpdatedAt
+		return local.WriteJSON(p, &parent)
+	}
 	return local.WriteJSON(p, j)
 }
 func (e *Engine) read(id string) (Job, error) {
 	var j Job
-	p, err := local.JobPath(e.Root, id)
+	base, index, err := splitJobID(id)
+	if err != nil {
+		return j, err
+	}
+	p, err := local.JobPath(e.Root, base)
 	if err != nil {
 		return j, err
 	}
@@ -87,10 +122,67 @@ func (e *Engine) read(id string) (Job, error) {
 	if err != nil {
 		return j, err
 	}
-	if json.Unmarshal(b, &j) != nil || j.ID != id {
+	if json.Unmarshal(b, &j) != nil || j.ID != base {
 		return j, fault.New("LOCAL_ERROR", "Journal de tâche illisible.")
 	}
+	if index > 0 {
+		if index > len(j.Variants) {
+			return j, fault.New("JOB_NOT_FOUND", "Variante introuvable.")
+		}
+		return j.Variants[index-1], nil
+	}
 	return j, nil
+}
+
+// Variants share one atomic journal and lock. A crash cannot orphan siblings.
+func splitJobID(id string) (string, int, error) {
+	base, suffix, found := strings.Cut(id, ":")
+	if !found {
+		return id, 0, nil
+	}
+	i, err := strconv.Atoi(suffix)
+	if err != nil || i < 1 {
+		return "", 0, fault.New("INVALID_ARGUMENT", "Référence de variante invalide.")
+	}
+	return base, i, nil
+}
+func (e *Engine) jobPath(id string) (string, error) {
+	base, _, err := splitJobID(id)
+	if err != nil {
+		return "", err
+	}
+	return local.JobPath(e.Root, base)
+}
+func aggregate(j *Job) {
+	if len(j.Variants) == 0 {
+		return
+	}
+	progress := 0.0
+	done, ok := 0, 0
+	unknown := false
+	for _, v := range j.Variants {
+		progress += v.Progress
+		if studio.Terminal(v.State) || v.State == "downloaded" {
+			done++
+		}
+		if v.State == "success" || v.State == "downloaded" {
+			ok++
+		}
+		unknown = unknown || v.State == "outcome_unknown"
+	}
+	j.Progress = progress / float64(len(j.Variants))
+	switch {
+	case unknown:
+		j.State = "outcome_unknown"
+	case done < len(j.Variants):
+		j.State = "running"
+	case ok == len(j.Variants):
+		j.State = "success"
+	case ok == 0:
+		j.State = "failed"
+	default:
+		j.State = "partial"
+	}
 }
 
 func (e *Engine) Status(ctx context.Context) (any, error) {
@@ -152,22 +244,9 @@ func (e *Engine) Generate(ctx context.Context, in GenerateRequest) (View, error)
 	if err != nil {
 		return empty, err
 	}
-	imageHash := ""
-	if params.Image != "" {
-		if _, err = studio.ValidateImage(params.Image); err != nil {
-			return empty, err
-		}
-		f, err := os.Open(params.Image)
-		if err != nil {
-			return empty, err
-		}
-		h := sha256.New()
-		_, err = io.Copy(h, io.LimitReader(f, studio.MaxImageBytes+1))
-		f.Close()
-		if err != nil {
-			return empty, err
-		}
-		imageHash = hex.EncodeToString(h.Sum(nil))
+	imageHash, err := imageHashes(params.FilePaths())
+	if err != nil {
+		return empty, err
 	}
 	s, c, err := e.client(ctx)
 	if err != nil {
@@ -175,7 +254,7 @@ func (e *Engine) Generate(ctx context.Context, in GenerateRequest) (View, error)
 	}
 	hash, err := fingerprint(struct {
 		Input     studio.GenerateInput
-		ImageHash string
+		ImageHash []string
 		Account   string
 	}{params, imageHash, s.Account})
 	if err != nil {
@@ -192,24 +271,36 @@ func (e *Engine) Generate(ctx context.Context, in GenerateRequest) (View, error)
 	if existing {
 		return j.View(), nil
 	}
-	var image *studio.Image
-	if params.Image != "" {
-		image, err = c.Upload(ctx, params.Image)
-		if err != nil {
-			j.State = "failed"
-			j.Error = fault.Public(err)
-			if saveErr := e.save(&j); saveErr != nil {
-				return j.View(), saveErr
-			}
-			return j.View(), err
-		}
+	images, err := uploadImages(ctx, c, params.FilePaths())
+	if err != nil {
+		return e.failPreparing(&j, err)
+	}
+	if err = sameImages(params.FilePaths(), imageHash); err != nil {
+		return e.failPreparing(&j, err)
 	}
 	// Persist uncertainty before dispatch; a crash at any later instruction cannot trigger a second charge.
 	j.State = "outcome_unknown"
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}
-	j.Receipt, err = c.Generate(ctx, params, image)
+	receipts, err := c.Generate(ctx, params, images)
+	if len(receipts) == 1 && receipts[0].Accepted && err == nil {
+		j.Receipt = receipts[0].Receipt
+	} else if len(receipts) > 0 {
+		for i, r := range receipts {
+			state := "submitted"
+			var failure *fault.Error
+			if !r.Accepted {
+				state = "failed"
+				failure = fault.Public(fault.New("VARIATION_REJECTED", "Studio a refusé cette variante."))
+			}
+			if r.Accepted && (r.ProjectID == "" || r.OperatorID == "") {
+				state = "outcome_unknown"
+				failure = fault.Public(fault.New("OUTCOME_UNKNOWN", "Reçu de variante incomplet ; vérifier Studio."))
+			}
+			j.Variants = append(j.Variants, Job{ID: j.ID + ":" + strconv.Itoa(i+1), Kind: "generate", State: state, Account: j.Account, Receipt: r.Receipt, Format: "glb", CreatedAt: j.CreatedAt, Error: failure})
+		}
+	}
 	if err != nil {
 		j.Error = fault.Public(err)
 		if !studio.IsUncertain(err) {
@@ -217,6 +308,9 @@ func (e *Engine) Generate(ctx context.Context, in GenerateRequest) (View, error)
 		}
 	} else {
 		j.State = "submitted"
+	}
+	if err == nil {
+		aggregate(&j)
 	}
 	if saveErr := e.save(&j); saveErr != nil {
 		return j.View(), fault.New("OUTCOME_UNKNOWN", "Réponse reçue mais journal non enregistré ; vérifier Studio avant toute nouvelle demande.")
@@ -275,7 +369,7 @@ func (e *Engine) List() ([]View, error) {
 }
 
 func (e *Engine) Poll(ctx context.Context, id string) (View, error) {
-	p, err := local.JobPath(e.Root, id)
+	p, err := e.jobPath(id)
 	if err != nil {
 		return View{}, err
 	}
@@ -288,35 +382,66 @@ func (e *Engine) Poll(ctx context.Context, id string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	if j.State == "downloaded" || studio.Terminal(j.State) || j.State == "outcome_unknown" || j.Receipt.OperatorID == "" {
-		return j.View(), nil
-	}
-	s, c, err := e.client(ctx)
-	if err != nil {
-		return j.View(), err
-	}
-	if s.Account != j.Account {
-		return j.View(), fault.New("ACCOUNT_CHANGED", "Cette tâche appartient à une autre session Studio.")
-	}
-	progress, err := c.Progress(ctx, j.Receipt.OperatorID)
-	if err != nil {
-		return j.View(), err
-	}
-	j.Progress = progress.Progress
-	j.State = progress.Status
-	if j.State == "" {
-		return j.View(), fault.New("PROTOCOL_CHANGED", "État de génération absent.")
-	}
-	if progress.ModelURL != "" {
-		j.DownloadRef, err = local.Protect([]byte(progress.ModelURL))
-		if err != nil {
+	if len(j.Variants) > 0 {
+		var firstErr error
+		for i := range j.Variants {
+			if err = e.poll(ctx, &j.Variants[i]); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		// An incomplete submission stays uncertain even if its known children finish.
+		if j.Error == nil || j.Error.Code != "OUTCOME_UNKNOWN" {
+			aggregate(&j)
+		}
+		if err = e.save(&j); err != nil {
 			return j.View(), err
 		}
+		return j.View(), firstErr
+	}
+	err = e.poll(ctx, &j)
+	if err != nil {
+		return j.View(), err
 	}
 	if err = e.save(&j); err != nil {
 		return j.View(), err
 	}
 	return j.View(), nil
+}
+
+func (e *Engine) poll(ctx context.Context, j *Job) error {
+	if j.State == "downloaded" || studio.Terminal(j.State) || j.State == "outcome_unknown" || j.Receipt.OperatorID == "" {
+		return nil
+	}
+	s, c, err := e.client(ctx)
+	if err != nil {
+		return err
+	}
+	if s.Account != j.Account {
+		return fault.New("ACCOUNT_CHANGED", "Cette tâche appartient à une autre session Studio.")
+	}
+	progress, err := c.Progress(ctx, j.Receipt.OperatorID)
+	if err != nil {
+		return err
+	}
+	j.Progress = progress.Progress
+	j.State = progress.Status
+	if j.State == "failed" {
+		message := "Le traitement Studio a échoué ; aucune nouvelle soumission automatique."
+		if progress.Reason != nil {
+			message = fmt.Sprintf("Le traitement Studio a échoué (code %d) ; vérifier les paramètres avant toute nouvelle demande.", progress.Reason.Code)
+		}
+		j.Error = fault.Public(fault.New("STUDIO_TASK_FAILED", message))
+	}
+	if j.State == "" {
+		return fault.New("PROTOCOL_CHANGED", "État de génération absent.")
+	}
+	if progress.ModelURL != "" {
+		j.DownloadRef, err = local.Protect([]byte(progress.ModelURL))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Engine) Wait(ctx context.Context, id string) (View, error) {
@@ -340,7 +465,7 @@ func (e *Engine) Wait(ctx context.Context, id string) (View, error) {
 }
 
 func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
-	p, err := local.JobPath(e.Root, id)
+	p, err := e.jobPath(id)
 	if err != nil {
 		return View{}, err
 	}
@@ -352,6 +477,9 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 	j, err := e.read(id)
 	if err != nil {
 		return View{}, err
+	}
+	if len(j.Variants) > 0 {
+		return j.View(), fault.New("INVALID_ARGUMENT", "Choisir une variante : job_id:1, job_id:2, etc.")
 	}
 	if j.State == "downloaded" && j.Artifact != nil {
 		if info, err := os.Stat(j.Artifact.Path); err == nil && info.Size() == j.Artifact.Bytes {
@@ -371,12 +499,18 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 		return j.View(), fault.New("ACCOUNT_CHANGED", "Cette tâche appartient à un autre compte Studio.")
 	}
 	remote := ""
-	if j.Kind == "generate" {
+	if j.Kind != "export" {
 		project, err := c.Project(ctx, j.Receipt.ProjectID, j.Receipt.OperatorID)
 		if err != nil {
 			return j.View(), err
 		}
 		remote = studio.AssetURL(project)
+		if remote != "" {
+			j.Format, err = studio.ModelFormat(remote)
+			if err != nil {
+				return j.View(), err
+			}
+		}
 	} else if len(j.DownloadRef) > 0 {
 		b, err := local.Unprotect(j.DownloadRef)
 		if err != nil {
@@ -395,7 +529,12 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 		return j.View(), fault.New("ASSET_UNAVAILABLE", "Studio n'a pas fourni le fichier de ce modèle ; vérifier son état ou demander un export explicite.")
 	}
 	if path == "" {
-		path = filepath.Join(e.Root, "downloads", id, "model."+j.Format)
+		base, index, _ := splitJobID(id)
+		folder := filepath.Join(e.Root, "downloads", base)
+		if index > 0 {
+			folder = filepath.Join(folder, "variant-"+strconv.Itoa(index))
+		}
+		path = filepath.Join(folder, "model."+j.Format)
 	}
 	artifact, err := studio.Download(ctx, remote, path, j.Format)
 	if err != nil {
@@ -410,9 +549,9 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 }
 
 type ExportRequest struct {
+	studio.ExportOptions
 	JobID     string `json:"job_id"`
 	RequestID string `json:"request_id,omitempty"`
-	Format    string `json:"format"`
 	Confirm   bool   `json:"confirm"`
 }
 
@@ -420,10 +559,11 @@ func (e *Engine) Export(ctx context.Context, in ExportRequest) (View, error) {
 	if !in.Confirm {
 		return View{}, fault.New("CONFIRM_REQUIRED", "L'export peut consommer des crédits Studio ; autorisation requise (--yes).")
 	}
-	if in.Format != "glb" && in.Format != "fbx" {
-		return View{}, fault.New("INVALID_ARGUMENT", "Format attendu : glb ou fbx.")
+	opts, err := in.ExportOptions.Normalize()
+	if err != nil {
+		return View{}, err
 	}
-	source, err := e.read(in.JobID)
+	source, err := e.source(in.JobID)
 	if err != nil {
 		return View{}, err
 	}
@@ -437,21 +577,32 @@ func (e *Engine) Export(ctx context.Context, in ExportRequest) (View, error) {
 	if s.Account != source.Account {
 		return View{}, fault.New("ACCOUNT_CHANGED", "Cette tâche appartient à un autre compte.")
 	}
-	input := studio.ExportInput{Format: in.Format, Project: source.Receipt.ProjectID}
-	hash, err := fingerprint(input)
+	input := studio.ExportInput{ExportOptions: opts, Project: source.Receipt.ProjectID}
+	hash, err := fingerprint(struct {
+		Input  studio.ExportInput
+		Source studio.Receipt
+	}{input, source.Receipt})
 	if err != nil {
 		return View{}, err
 	}
 	if in.RequestID == "" {
 		in.RequestID = rand.Text()
 	}
-	j, unlock, existing, err := e.begin(in.RequestID, "export", in.Format, s.Account, hash)
+	j, unlock, existing, err := e.begin(in.RequestID, "export", opts.FileFormat(), s.Account, hash)
 	if err != nil {
 		return View{}, err
 	}
 	defer unlock()
 	if existing {
 		return j.View(), nil
+	}
+	projectUnlock, err := e.projectLock(s.Account, source.Receipt.ProjectID)
+	if err != nil {
+		return e.failPreparing(&j, err)
+	}
+	defer projectUnlock()
+	if _, err = currentSource(ctx, c, source); err != nil {
+		return e.failPreparing(&j, err)
 	}
 	j.State = "outcome_unknown"
 	if err = e.save(&j); err != nil {
