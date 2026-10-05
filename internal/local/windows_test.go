@@ -27,3 +27,16 @@ func TestCommitNewNeverClobbersConcurrentDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestJobIDsRejectWindowsDevices(t *testing.T) {
+	for _, id := range []string{"con", "PRN", "AUX", "Nul", "COM1", "com9", "LPT1", "lpt9", "../job", "a:b"} {
+		if _, err := JobPath(t.TempDir(), id); err == nil {
+			t.Errorf("reserved or unsafe ID accepted: %s", id)
+		}
+	}
+	for _, id := range []string{"job-1", "owl_001", "COM10", "console", "lpt0"} {
+		if !ValidID(id) {
+			t.Errorf("safe ID rejected: %s", id)
+		}
+	}
+}

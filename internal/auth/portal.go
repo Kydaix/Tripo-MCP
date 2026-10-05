@@ -105,7 +105,12 @@ func (p *portal) capture(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JSON requis", http.StatusUnsupportedMediaType)
 		return
 	}
-	p.mu.Lock()
+	if !p.mu.TryLock() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": fault.Public(fault.New("BUSY", "Un transfert est déjà en cours ; attendre sa fin avant de réessayer."))})
+		return
+	}
 	defer p.mu.Unlock()
 	if p.completed {
 		http.Error(w, "Transfert déjà terminé", http.StatusConflict)
@@ -128,13 +133,18 @@ func (p *portal) capture(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Entrée invalide", http.StatusBadRequest)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
 	renew := p.renew
 	if renew == nil {
 		renew = Renew
 	}
-	s, err := Prepare(r.Context(), Session{Token: strings.TrimPrefix(input.Authorization, "Bearer "), DeviceID: input.Device, Region: input.Region, Cookie: input.Cookie}, renew)
+	s, err := Prepare(ctx, Session{Token: strings.TrimPrefix(input.Authorization, "Bearer "), DeviceID: input.Device, Region: input.Region, Cookie: input.Cookie}, renew)
 	if err == nil {
-		err = p.verify(r.Context(), s)
+		err = p.verify(ctx, s)
+	}
+	if ctx.Err() != nil {
+		err = fault.New("NETWORK_ERROR", "La vérification n'a pas abouti à temps ; vérifier la connexion puis réessayer.")
 	}
 	if err == nil {
 		var unlock func()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/Kydaix/Tripo-MCP/internal/fault"
+	"strings"
 )
 
 type EditInput struct {
@@ -36,6 +37,7 @@ var editFields = map[string][]string{
 }
 
 func (in EditInput) Normalize() (EditInput, error) {
+	in.Prompt = strings.TrimSpace(in.Prompt)
 	allowed, ok := editFields[in.Operation]
 	if !ok {
 		return in, invalid("Opération inconnue ; consulter capabilities.")
@@ -138,7 +140,7 @@ func (in EditInput) Normalize() (EditInput, error) {
 		return in, invalid("Trop de parties ou d'animations.")
 	}
 	for _, v := range append(append([]string{}, in.Parts...), in.Animations...) {
-		if v == "" || len(v) > 256 {
+		if strings.TrimSpace(v) == "" || len(v) > 256 {
 			return in, invalid("Nom de partie ou d'animation invalide.")
 		}
 	}

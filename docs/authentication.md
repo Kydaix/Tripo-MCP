@@ -22,6 +22,8 @@ Studio s’appuie sur le mécanisme [session → JWT d’Ory](https://www.ory.co
 
 Le portail attend le transfert avec `login.lock`, puis prend brièvement `auth.lock` pour enregistrer la connexion. Laisser une page de connexion ouverte ne bloque donc pas le renouvellement de la session existante.
 
+La page conserve les champs en mémoire pendant la vérification et après un refus, pour permettre une correction sans tout recopier. Elle les efface après réussite ou lorsqu'on quitte la page ; aucun secret n'est stocké dans le stockage web. Les doubles envois sont refusés. La vérification serveur dispose de 60 secondes et le navigateur interrompt son attente après 65 secondes. Une annulation détectée avant l'enregistrement empêche la création de la session.
+
 Les opérations Studio ne reçoivent que le jeton d’accès et les en-têtes Tripo. Les téléchargements gardent leur transport séparé. Le cookie n’est transmis qu’à l’URL de connexion fixe, sans suivre de redirection. Aucune réponse publique, trace ou tâche enregistrée ne contient les secrets.
 
 ## Validation

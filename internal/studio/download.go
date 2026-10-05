@@ -63,6 +63,8 @@ func Download(ctx context.Context, raw, destination, format string) (Artifact, e
 	}
 	if _, err := os.Lstat(destination); err == nil {
 		return result, fault.New("FILE_EXISTS", "Le fichier de destination existe déjà ; choisir un autre chemin.")
+	} else if !os.IsNotExist(err) {
+		return result, err
 	}
 	if err = os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
 		return result, err
@@ -86,7 +88,7 @@ func Download(ctx context.Context, raw, destination, format string) (Artifact, e
 			return nil, err
 		}
 		for _, ip := range ips {
-			if ip.IP.IsPrivate() || ip.IP.IsLoopback() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsUnspecified() {
+			if !ip.IP.IsGlobalUnicast() || ip.IP.IsPrivate() || ip.IP.IsLoopback() || ip.IP.IsLinkLocalUnicast() {
 				return nil, fault.New("INVALID_ASSET", "Adresse de stockage non publique.")
 			}
 		}
@@ -140,6 +142,77 @@ func Download(ctx context.Context, raw, destination, format string) (Artifact, e
 		return result, fault.New("DOWNLOAD_FAILED", "Impossible de finaliser le fichier ; vérifier la destination.")
 	}
 	return Artifact{Path: destination, Bytes: n, SHA256: hex.EncodeToString(h.Sum(nil)), Format: format}, nil
+}
+
+// ReuseArtifact verifies the saved checksum even when the size is unchanged.
+// An explicit new destination creates a verified local copy, with no network.
+func ReuseArtifact(ctx context.Context, saved Artifact, destination string) (Artifact, error) {
+	f, err := os.Open(saved.Path)
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return Artifact{}, err
+	}
+	changed := fault.New("ARTIFACT_CHANGED", "Le fichier local a été modifié ; déplacer ce fichier avant de retélécharger l'original.")
+	if !info.Mode().IsRegular() || info.Size() != saved.Bytes || saved.SHA256 == "" {
+		return Artifact{}, changed
+	}
+	if destination == "" {
+		destination = saved.Path
+	}
+	destination, err = filepath.Abs(destination)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if !strings.EqualFold(filepath.Ext(destination), "."+saved.Format) {
+		return Artifact{}, invalid("L'extension de sortie doit correspondre au format " + saved.Format + ".")
+	}
+	h := sha256.New()
+	var writer io.Writer = h
+	var tmp *os.File
+	if !strings.EqualFold(filepath.Clean(saved.Path), destination) {
+		if _, err = os.Lstat(destination); err == nil {
+			return Artifact{}, fault.New("FILE_EXISTS", "Le fichier de destination existe déjà ; choisir un autre chemin.")
+		} else if !os.IsNotExist(err) {
+			return Artifact{}, err
+		}
+		if err = os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+			return Artifact{}, err
+		}
+		tmp, err = os.CreateTemp(filepath.Dir(destination), ".tripo-download-*")
+		if err != nil {
+			return Artifact{}, err
+		}
+		defer os.Remove(tmp.Name())
+		defer tmp.Close()
+		writer = io.MultiWriter(h, tmp)
+	}
+	n, err := io.Copy(writer, io.LimitReader(f, saved.Bytes+1))
+	if err != nil {
+		return Artifact{}, err
+	}
+	if err = ctx.Err(); err != nil {
+		return Artifact{}, err
+	}
+	if n != saved.Bytes || hex.EncodeToString(h.Sum(nil)) != saved.SHA256 {
+		return Artifact{}, changed
+	}
+	if tmp != nil {
+		if err = tmp.Sync(); err != nil {
+			return Artifact{}, err
+		}
+		if err = tmp.Close(); err != nil {
+			return Artifact{}, err
+		}
+		if err = local.CommitNew(tmp.Name(), destination); err != nil {
+			return Artifact{}, fault.New("DOWNLOAD_FAILED", "Impossible de finaliser le fichier ; vérifier la destination.")
+		}
+	}
+	saved.Path = destination
+	return saved, nil
 }
 
 func ValidateModel(r io.Reader, size int64, format string) error {

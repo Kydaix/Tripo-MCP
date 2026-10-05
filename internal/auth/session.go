@@ -45,13 +45,23 @@ func FromHeader(header, device, region string) (Session, error) {
 
 func parseHeader(header, device, region string) (Session, error) {
 	var s Session
-	if !strings.HasPrefix(header, "Bearer ") || len(header) > 16384 || len(device) > 256 || len(region) > 32 || strings.ContainsAny(device+region, "\r\n") {
+	if !strings.HasPrefix(header, "Bearer ") || len(header) > 16384 || len(device) > 256 || len(region) > 32 {
 		return s, fault.New("AUTH_REQUIRED", "Session Studio invalide.")
+	}
+	for _, c := range device + region {
+		if c < 0x21 || c > 0x7e {
+			return s, fault.New("AUTH_REQUIRED", "En-tête de session Studio invalide.")
+		}
 	}
 	token := strings.TrimPrefix(header, "Bearer ")
 	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		return s, fault.New("AUTH_REQUIRED", "Format de session Studio inconnu.")
+	}
+	for _, c := range token {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
+			return s, fault.New("AUTH_REQUIRED", "Format de session Studio invalide.")
+		}
 	}
 	b, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {

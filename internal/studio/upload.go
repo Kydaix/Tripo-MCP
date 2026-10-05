@@ -49,6 +49,15 @@ func ValidateImage(path string) (string, error) {
 	if format != "png" && format != "jpg" && format != "webp" {
 		return "", fault.New("INVALID_ARGUMENT", "Formats d'image : PNG, JPEG et WebP.")
 	}
+	var header [512]byte
+	n, err := f.Read(header[:])
+	if err != nil && err != io.EOF {
+		return "", invalid("Image illisible.")
+	}
+	expected := map[string]string{"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}[format]
+	if http.DetectContentType(header[:n]) != expected {
+		return "", invalid("Le contenu de l'image ne correspond pas à son extension PNG, JPEG ou WebP.")
+	}
 	return format, nil
 }
 

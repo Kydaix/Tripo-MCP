@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseSession} from './session.mjs';
 
+test('normalizes bearer casing and validates complete header lengths', () => {
+  const jwt = ['e30', 'fixture', 'test'].join('.');
+  const fields = {authorization: 'bearer\t' + jwt, device: 'fixture'};
+  assert.equal(parseSession('', fields).authorization, 'Bearer ' + jwt);
+  for (const device of ['a'.repeat(257), 'bad\x00value', 'bad value']) {
+    assert.throws(() => parseSession('', {...fields, device}), {field: 'device'});
+  }
+  assert.throws(() => parseSession('', {...fields, region: 'x'.repeat(33)}), {field: 'region'});
+  assert.throws(() => parseSession('x'.repeat(65537), fields), {field: 'request'});
+  const copy = `fetch('https://api.tripo3d.ai/', {headers: {'authorization': 'Bearer ${jwt}', 'x-tripo-device-id': '${'x'.repeat(257)}'}})`;
+  assert.throws(() => parseSession(copy), {field: 'request'});
+});
+
 test('accepts the renewable cookie without importing other browser cookies',()=>{
   const jwt = ['e30', 'eyJzdWIiOiJmaXh0dXJlIn0', 'test'].join('.');
   const fields = {authorization:'Bearer '+jwt,device:'fixture-device',cookie:'ory_kratos_session=fixture%2F=='};

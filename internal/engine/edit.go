@@ -95,10 +95,15 @@ func currentSource(ctx context.Context, c *studio.Client, source Job) (map[strin
 	if op["operator_id"] != source.Receipt.OperatorID {
 		return nil, fault.New("SOURCE_CHANGED", "Le projet Studio a une autre version courante ; utiliser la tâche correspondant à cette version. Aucune restauration automatique.")
 	}
-	if v := detail["running_operator"]; v != nil && v != false && v != "" {
+	if projectRunning(detail) {
 		return nil, fault.New("NOT_READY", "Une opération est déjà en cours sur ce projet Studio.")
 	}
 	return op, nil
+}
+
+func projectRunning(detail map[string]any) bool {
+	v := detail["running_operator"]
+	return v != nil && v != false && v != ""
 }
 func (e *Engine) projectLock(account, project string) (func(), error) {
 	key := sha256.Sum256([]byte(account + ":" + project))

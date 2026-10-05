@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"github.com/Kydaix/Tripo-MCP/internal/studio"
@@ -105,7 +106,14 @@ func readParams(path string, value any) error {
 		return err
 	}
 	defer f.Close()
-	decoder := json.NewDecoder(io.LimitReader(f, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return err
+	}
+	if len(b) > 1<<20 || !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) {
+		return os.ErrInvalid
+	}
+	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(value); err != nil {
 		return err

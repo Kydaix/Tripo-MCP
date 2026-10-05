@@ -1,6 +1,9 @@
 package studio
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type ExportOptions struct {
 	Format         string   `json:"format" jsonschema:"glb, fbx, obj, stl, 3mf ou usdz."`
@@ -61,6 +64,11 @@ func (in ExportOptions) Normalize() (ExportOptions, error) {
 	}
 	if in.BakeFrame < 0 || in.BakeFrame > 10000000 || len(in.Animations) > 100 {
 		return in, invalid("Paramètres d'animation invalides.")
+	}
+	for _, animation := range in.Animations {
+		if strings.TrimSpace(animation) == "" || len(animation) > 256 {
+			return in, invalid("Nom d'animation invalide.")
+		}
 	}
 	if !in.WithAnimation && !in.BakeAnimation && (len(in.Animations) > 0 || in.AnimateInPlace || in.BakeFrame != 0) {
 		return in, invalid("Activer with_animation ou bake_animation.")

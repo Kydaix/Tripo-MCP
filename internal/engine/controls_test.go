@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"github.com/Kydaix/Tripo-MCP/internal/auth"
 	"github.com/Kydaix/Tripo-MCP/internal/fault"
@@ -236,7 +238,8 @@ func TestTextureResolvesAllPartsFromDownloadedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	source.State = "downloaded"
-	source.Artifact = &studio.Artifact{Path: p, Bytes: int64(len(b)), Format: "glb"}
+	digest := sha256.Sum256(b)
+	source.Artifact = &studio.Artifact{Path: p, Bytes: int64(len(b)), Format: "glb", SHA256: hex.EncodeToString(digest[:])}
 	if err = e.save(&source); err != nil {
 		t.Fatal(err)
 	}

@@ -492,8 +492,18 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 		return j.View(), fault.New("INVALID_ARGUMENT", "Choisir une variante : job_id:1, job_id:2, etc.")
 	}
 	if j.State == "downloaded" && j.Artifact != nil {
-		if info, err := os.Stat(j.Artifact.Path); err == nil && info.Size() == j.Artifact.Bytes {
+		artifact, err := studio.ReuseArtifact(ctx, *j.Artifact, path)
+		if err == nil {
+			if artifact.Path != j.Artifact.Path {
+				j.Artifact = &artifact
+				if err = e.save(&j); err != nil {
+					return j.View(), err
+				}
+			}
 			return j.View(), nil
+		}
+		if !os.IsNotExist(err) {
+			return j.View(), err
 		}
 		j.State = "success"
 		j.Artifact = nil
@@ -521,6 +531,13 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 				return j.View(), err
 			}
 		}
+	} else if j.Receipt.OperatorID != "" {
+		// Signed URLs expire. Resolve a fresh link for the existing export on
+		// every retrieval, without ever submitting another paid export.
+		remote, err = c.ExportURL(ctx, j.Receipt.OperatorID)
+		if err != nil {
+			return j.View(), err
+		}
 	} else if len(j.DownloadRef) > 0 {
 		b, err := local.Unprotect(j.DownloadRef)
 		if err != nil {
@@ -528,12 +545,6 @@ func (e *Engine) Download(ctx context.Context, id, path string) (View, error) {
 		}
 		remote = string(b)
 		clear(b)
-	}
-	if j.Kind == "export" && remote == "" {
-		remote, err = c.ExportURL(ctx, j.Receipt.OperatorID)
-		if err != nil {
-			return j.View(), err
-		}
 	}
 	if remote == "" {
 		return j.View(), fault.New("ASSET_UNAVAILABLE", "Studio n'a pas fourni le fichier de ce modèle ; vérifier son état ou demander un export explicite.")

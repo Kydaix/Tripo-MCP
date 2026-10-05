@@ -91,6 +91,8 @@ Les résultats sont en JSON et les diagnostics sur stderr. `generate` rend la ma
 
 Le téléchargement valide le format et la taille, calcule le SHA-256, puis finalise le fichier sans écraser une destination existante. Aucun export payant n’est lancé implicitement. L’import dans Blender, Roblox Studio ou un autre logiciel reste optionnel et passe par ses outils habituels.
 
+Un téléchargement répété vérifie aussi le SHA-256 du fichier local. Avec un autre `--out`, il crée une copie vérifiée sans accès réseau. Un fichier modifié produit `ARTIFACT_CHANGED` : le déplacer avant de récupérer à nouveau l'original. Pour un export muni d'un identifiant d'opération, chaque récupération distante demande un nouveau lien signé, sans recréer l'export.
+
 ## MCP
 
 Serveur stdio : `tripo-mcp mcp`. Exemple de configuration :
@@ -138,10 +140,13 @@ Go 1.27 sur Windows :
 ```powershell
 go test ./...
 go vet ./...
+node --test internal/auth/web/session.test.mjs internal/auth/web/app.test.mjs
 go build -o dist/tripo-mcp.exe .
 ```
 
 Tests sans crédits : contrats HTTP HD/P2/multivues/lots/texture/import/rig/export, variantes partiellement acceptées, reprises, doubles soumissions, sources remplacées, verrouillage concurrent, protection de session, validation des fichiers, CLI et échanges MCP. Les validations réelles couvrent texte HD → GLB et export FBX, puis texte P2.0 → FBX avec quadrangles → texture 8K → export GLB 8K. Les images intégrées aux fichiers ont été vérifiées dans Blender à 8192 × 8192 pixels. Les autres combinaisons restent vérifiées par contrats ; cela ne prouve pas leur acceptation par le serveur ni les droits d’un abonnement.
+
+La CI vérifie aussi les courses entre goroutines, les vulnérabilités connues et les builds Windows amd64/arm64. Le [bilan de fiabilisation](docs/production-readiness.md) décrit les corrections, les validations et les limites restantes.
 
 Architecture : `internal/auth` (connexion), `internal/studio` (transport), `internal/engine` (tâches), `internal/mcpserver` (adaptateur). CLI et MCP appellent les mêmes opérations. Les tags `v*` publient les deux exécutables Windows et leurs empreintes après les tests.
 
