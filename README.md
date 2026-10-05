@@ -22,12 +22,19 @@ tripo-mcp status
 1. Se connecter normalement à Studio dans son navigateur habituel.
 2. Ouvrir les outils de développement, onglet Réseau, filtrer `team/list`, puis actualiser Studio.
 3. Copier la requête `api.tripo3d.ai/v2/studio/team/list` comme fetch ou cURL et la coller dans la page locale. On peut aussi renseigner les en-têtes `Authorization` et `x-tripo-device-id` à la main.
+4. Pour activer le renouvellement automatique, copier la valeur du cookie `ory_kratos_session` dans le champ « Cookie de connexion ». Il se trouve dans **Application → Cookies** sur Chrome/Edge, ou **Stockage → Cookies** sur Firefox, sous le domaine Tripo.
 
-La copie n’est jamais exécutée. La page extrait uniquement les en-têtes de session nécessaires ; le client vérifie le compte auprès de Studio avant de les enregistrer. Aucun mot de passe n’est demandé. Le récepteur écoute seulement sur `127.0.0.1`, avec une autorisation temporaire par transfert, et s’arrête après réussite ou après 15 minutes.
+La copie n’est jamais exécutée. La page extrait uniquement les en-têtes Tripo nécessaires et le cookie de connexion indiqué ; les autres cookies sont ignorés. Le client vérifie le renouvellement et le compte auprès de Studio avant l’enregistrement. Aucun mot de passe n’est demandé. Le récepteur écoute seulement sur `127.0.0.1`, avec une autorisation temporaire par transfert, et s’arrête après réussite ou après 15 minutes. Ne jamais transmettre la requête ou le cookie dans une conversation, un argument de commande ou un dépôt.
 
-**À l’expiration du jeton Studio, refaire le transfert avec `login`.** Il n’y a pas de renouvellement automatique dans ce mode manuel. L’expiration est affichée après connexion et dans `status` ; les durées sont décidées par Studio.
+**Avec le cookie, les jetons se renouvellent automatiquement, même navigateur fermé.** Le CLI et le MCP utilisent le mécanisme de Studio avant les requêtes, avec une marge d’une minute et un verrou partagé entre processus. Aucun service permanent ni extension n’est nécessaire. Le cookie est envoyé uniquement au point de connexion Studio ; les opérations et les téléchargements ne le reçoivent pas.
+
+`tripo-mcp session` inspecte les données locales sans accès réseau. `renewable: true` indique que la session principale peut renouveler les jetons ; `expires_at` concerne le jeton d’accès et `session_expires_at`, lorsqu’il est fourni par Studio, concerne la connexion principale. `needs_refresh` indique qu’un nouveau jeton sera demandé lors du prochain accès. `tripo-mcp status` vérifie le compte en ligne et renouvelle au besoin.
+
+Un nouveau transfert reste nécessaire lorsque la connexion principale expire ou est révoquée. Sa durée est décidée par Studio et peut être écourtée côté serveur. Une erreur réseau ne supprime pas la connexion enregistrée ; une révocation confirmée lors du renouvellement la supprime. Une vérification humaine reste à terminer dans le navigateur. **Les anciens transferts sans cookie restent temporaires** : relancer `login` une fois avec le cookie pour les remplacer. Une requête payante n’est jamais rejouée automatiquement pour renouveler la connexion.
 
 Les données résident dans `%LOCALAPPDATA%\Tripo-MCP` : session chiffrée par Windows DPAPI, journal et modèles téléchargés. `logout` efface la session en conservant les modèles et leur journal. La variable facultative `TRIPO_MCP_HOME` choisit un autre chemin absolu de données.
+
+Le [fonctionnement de la connexion](docs/authentication.md) décrit le renouvellement, les verrous et les limites du mode manuel.
 
 ## Générer un modèle
 

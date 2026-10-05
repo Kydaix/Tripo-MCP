@@ -23,9 +23,10 @@ const API = "https://api.tripo3d.ai"
 const maxJSON = 8 << 20
 
 type Client struct {
-	Session auth.Session
-	HTTP    *http.Client
-	BaseURL string
+	Session     auth.Session
+	HTTP        *http.Client
+	BaseURL     string
+	Credentials func(context.Context) (auth.Session, error)
 }
 
 func New(s auth.Session) *Client {
@@ -36,6 +37,13 @@ func New(s auth.Session) *Client {
 func (c *Client) request(ctx context.Context, method, path string, body, out any, paid bool) error {
 	var data []byte
 	var err error
+	s := c.Session
+	if c.Credentials != nil {
+		s, err = c.Credentials(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	if body != nil {
 		data, err = json.Marshal(body)
 		if err != nil {
@@ -46,10 +54,10 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	if err != nil {
 		return fault.New("INVALID_ARGUMENT", "Requête invalide.")
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Session.Token)
-	req.Header.Set("X-Tripo-Device-Id", c.Session.DeviceID)
-	if c.Session.Region != "" {
-		req.Header.Set("X-Tripo-Region", c.Session.Region)
+	req.Header.Set("Authorization", "Bearer "+s.Token)
+	req.Header.Set("X-Tripo-Device-Id", s.DeviceID)
+	if s.Region != "" {
+		req.Header.Set("X-Tripo-Region", s.Region)
 	}
 	req.Header.Set("Origin", Origin)
 	req.Header.Set("Referer", Origin+"/")

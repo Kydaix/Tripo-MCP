@@ -24,9 +24,10 @@ import (
 type Engine struct {
 	Root   string
 	Client func(auth.Session) *studio.Client
+	Renew  auth.Renewer
 }
 
-func New(root string) *Engine { return &Engine{Root: root, Client: studio.New} }
+func New(root string) *Engine { return &Engine{Root: root, Client: studio.New, Renew: auth.Renew} }
 
 type Job struct {
 	Variants    []Job            `json:"variants,omitempty"`
@@ -72,11 +73,19 @@ func (j Job) View() View {
 }
 
 func (e *Engine) client(ctx context.Context) (auth.Session, *studio.Client, error) {
-	s, err := auth.Load(e.Root)
+	s, err := auth.Resolve(ctx, e.Root, e.Renew)
 	if err != nil {
 		return s, nil, err
 	}
-	return s, e.Client(s), nil
+	c := e.Client(s)
+	c.Credentials = func(ctx context.Context) (auth.Session, error) {
+		next, err := auth.Resolve(ctx, e.Root, e.Renew)
+		if err == nil && next.Account != s.Account {
+			return auth.Session{}, fault.New("ACCOUNT_CHANGED", "Le compte Studio a changé ; reprendre la commande avec le compte attendu.")
+		}
+		return next, err
+	}
+	return s, c, nil
 }
 func (e *Engine) save(j *Job) error {
 	base, index, err := splitJobID(j.ID)
@@ -194,11 +203,12 @@ func (e *Engine) Status(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"authenticated": true, "expires_at": c.Session.Expires, "studio": a}, nil
+	s := auth.Inspect(e.Root)
+	return map[string]any{"authenticated": true, "expires_at": s.Expires, "renewable": s.Renewable, "needs_refresh": s.NeedsRefresh, "session_expires_at": s.SessionExpires, "studio": a}, nil
 }
 
 func (e *Engine) ImportSession(ctx context.Context, s auth.Session) (auth.Status, error) {
-	verified, err := auth.FromHeader("Bearer "+s.Token, s.DeviceID, s.Region)
+	verified, err := auth.Prepare(ctx, s, e.Renew)
 	if err != nil {
 		return auth.Status{}, err
 	}

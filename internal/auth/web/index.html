@@ -4,16 +4,20 @@
 <body><main>
 <p class="brand">TRIPO-MCP <span>CONNEXION LOCALE</span></p>
 <h1>Connecter Tripo Studio</h1>
-<p class="intro">Utilise ton navigateur habituel. La session est transférée sur ce PC, puis protégée par Windows.</p>
+<p class="intro">Transfère ta connexion une fois pour renouveler automatiquement les jetons, même navigateur fermé. La session est protégée par Windows sur ce PC.</p>
 <ol>
 <li>Ouvre <a href="https://studio.tripo3d.ai/workspace/generate" target="_blank" rel="noreferrer noopener">Tripo Studio</a> et connecte-toi normalement.</li>
 <li>Ouvre les outils de développement (<kbd>F12</kbd>), onglet <strong>Réseau / Network</strong>. Filtre sur <code>team/list</code>, puis actualise la page.</li>
 <li>Sur la requête <code>api.tripo3d.ai/v2/studio/team/list</code>, choisis <strong>Copier → Copier comme fetch</strong> ou <strong>Copier comme cURL</strong>. Colle le résultat ci-dessous.</li>
+<li>Dans <strong>Application → Cookies</strong> (Chrome, Edge) ou <strong>Stockage → Cookies</strong> (Firefox), sélectionne le domaine Tripo et copie la valeur de <code>ory_kratos_session</code> dans le champ « Cookie de connexion ».</li>
 </ol>
 <form id="transfer" autocomplete="off">
 <label for="request">Requête copiée depuis Studio</label>
 <textarea id="request" rows="5" maxlength="65536" spellcheck="false" autocomplete="off" placeholder="fetch(…) ou curl …"></textarea>
 <p class="hint">La requête collée n’est jamais exécutée. Seuls le jeton de session et les en-têtes Tripo nécessaires sont transmis au service local.</p>
+<label for="cookie">Cookie de connexion <span>(pour le renouvellement automatique)</span></label>
+<input id="cookie" type="password" autocomplete="off" spellcheck="false" maxlength="8220" aria-describedby="cookie-help" placeholder="Valeur de ory_kratos_session">
+<p id="cookie-help" class="hint">Le cookie est vérifié puis chiffré sur ce PC. Sans lui, la connexion reste limitée à la durée du jeton temporaire.</p>
 <details><summary>Renseigner les en-têtes manuellement</summary>
 <label for="authorization">Authorization</label><input id="authorization" type="password" autocomplete="off" placeholder="Bearer …">
 <label for="device">x-tripo-device-id</label><input id="device" autocomplete="off">
@@ -22,5 +26,5 @@
 <button type="submit" id="submit">Vérifier et connecter</button>
 <p id="status" role="status" aria-live="polite"></p>
 </form>
-<p class="foot">Ne partage pas cette requête dans une conversation ou un dépôt. À l’expiration de la session, relance <code>tripo-mcp login</code>. Cette page se ferme côté service après le transfert, ou après 15 minutes.</p>
+<p class="foot">Ne partage ni la requête ni le cookie dans une conversation ou un dépôt. Un nouveau transfert sera nécessaire si Studio expire ou révoque la connexion principale. Le service local s’arrête après le transfert, ou après 15 minutes.</p>
 </main></body></html>
