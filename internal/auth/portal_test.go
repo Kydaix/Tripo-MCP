@@ -102,3 +102,39 @@ func TestPortalVerificationFailureDoesNotSave(t *testing.T) {
 		t.Fatal("unverified session persisted")
 	}
 }
+
+func TestPortalVerifiesRenewableCookieBeforeSaving(t *testing.T) {
+	root := t.TempDir()
+	s := renewable(t)
+	renewed, verified := false, false
+	p := &portal{root: root, host: "127.0.0.1:12345", capability: "fixture", done: make(chan Status, 1),
+		renew: func(_ context.Context, input Session) (Session, error) {
+			renewed = true
+			if input.Cookie != s.Cookie || input.Account != s.Account {
+				t.Fatal("cookie or identity lost")
+			}
+			input.Token = token(t, time.Now().Add(time.Hour))
+			input.Expires = time.Now().Add(time.Hour)
+			input.SessionExpires = s.SessionExpires
+			return input, nil
+		}, verify: func(_ context.Context, input Session) error {
+			verified = true
+			if !renewed {
+				t.Error("account checked before renewal")
+			}
+			return nil
+		}}
+	b, _ := json.Marshal(map[string]string{"authorization": "Bearer " + s.Token, "device_id": s.DeviceID, "session_cookie": s.Cookie})
+	r := httptest.NewRequest("POST", "http://"+p.host+"/session", strings.NewReader(string(b)))
+	r.Header.Set("Origin", "http://"+p.host)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Tripo-MCP-Transfer", p.capability)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != 200 || !renewed || !verified || !Inspect(root).Renewable {
+		t.Fatal("renewable transfer failed")
+	}
+	if strings.Contains(w.Body.String(), s.Cookie) || strings.Contains(w.Body.String(), s.Token) {
+		t.Fatal("secret in portal response")
+	}
+}

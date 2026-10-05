@@ -24,6 +24,7 @@ var portalFiles embed.FS
 type portal struct {
 	root, host, capability string
 	verify                 func(context.Context, Session) error
+	renew                  Renewer
 	done                   chan Status
 	mu                     sync.Mutex
 	completed              bool
@@ -31,7 +32,7 @@ type portal struct {
 
 // Login starts a temporary loopback-only receiver. The human's browser is never controlled.
 func Login(ctx context.Context, root string, ready func(string), verify func(context.Context, Session) error) (Status, error) {
-	unlock, err := local.Lock(filepath.Join(root, "auth.lock"))
+	unlock, err := local.Lock(filepath.Join(root, "login.lock"))
 	if err != nil {
 		return Status{}, err
 	}
@@ -114,6 +115,7 @@ func (p *portal) capture(w http.ResponseWriter, r *http.Request) {
 		Authorization string `json:"authorization"`
 		Device        string `json:"device_id"`
 		Region        string `json:"region"`
+		Cookie        string `json:"session_cookie"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32768))
 	decoder.DisallowUnknownFields()
@@ -126,15 +128,21 @@ func (p *portal) capture(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Entrée invalide", http.StatusBadRequest)
 		return
 	}
-	s, err := FromHeader(input.Authorization, input.Device, input.Region)
-	if err == nil && s.DeviceID == "" {
-		err = fault.New("INVALID_ARGUMENT", "En-tête x-tripo-device-id manquant.")
+	renew := p.renew
+	if renew == nil {
+		renew = Renew
 	}
+	s, err := Prepare(r.Context(), Session{Token: strings.TrimPrefix(input.Authorization, "Bearer "), DeviceID: input.Device, Region: input.Region, Cookie: input.Cookie}, renew)
 	if err == nil {
 		err = p.verify(r.Context(), s)
 	}
 	if err == nil {
-		err = Save(p.root, s)
+		var unlock func()
+		unlock, err = local.Lock(filepath.Join(p.root, "auth.lock"))
+		if err == nil {
+			err = Save(p.root, s)
+			unlock()
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
@@ -142,7 +150,7 @@ func (p *portal) capture(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": fault.Public(err)})
 		return
 	}
-	status := Status{Authenticated: true, Expires: s.Expires}
+	status := s.Status()
 	p.completed = true
 	_ = json.NewEncoder(w).Encode(status)
 	p.done <- status

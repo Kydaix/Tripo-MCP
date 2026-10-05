@@ -18,19 +18,32 @@ import (
 
 // Session is private transport state. Never return it from a tool or print it.
 type Session struct {
-	Token    string    `json:"token"`
-	DeviceID string    `json:"device_id"`
-	Region   string    `json:"region,omitempty"`
-	Account  string    `json:"account"`
-	Expires  time.Time `json:"expires_at"`
+	Token          string    `json:"token"`
+	DeviceID       string    `json:"device_id"`
+	Region         string    `json:"region,omitempty"`
+	Account        string    `json:"account"`
+	Expires        time.Time `json:"expires_at"`
+	Cookie         string    `json:"session_cookie,omitempty"`
+	SessionExpires time.Time `json:"session_expires_at,omitempty"`
 }
 
 type Status struct {
-	Authenticated bool      `json:"authenticated"`
-	Expires       time.Time `json:"expires_at,omitempty"`
+	Authenticated  bool       `json:"authenticated"`
+	Expires        time.Time  `json:"expires_at,omitempty"`
+	Renewable      bool       `json:"renewable"`
+	NeedsRefresh   bool       `json:"needs_refresh"`
+	SessionExpires *time.Time `json:"session_expires_at,omitempty"`
 }
 
 func FromHeader(header, device, region string) (Session, error) {
+	s, err := parseHeader(header, device, region)
+	if err == nil && !s.Expires.After(time.Now().Add(30*time.Second)) {
+		return Session{}, fault.New("AUTH_EXPIRED", "Session expirée ; lancer tripo-mcp login.")
+	}
+	return s, err
+}
+
+func parseHeader(header, device, region string) (Session, error) {
 	var s Session
 	if !strings.HasPrefix(header, "Bearer ") || len(header) > 16384 || len(device) > 256 || len(region) > 32 || strings.ContainsAny(device+region, "\r\n") {
 		return s, fault.New("AUTH_REQUIRED", "Session Studio invalide.")
@@ -49,8 +62,8 @@ func FromHeader(header, device, region string) (Session, error) {
 		return s, fault.New("AUTH_REQUIRED", "Session Studio illisible.")
 	}
 	exp, ok := claims["exp"].(float64)
-	if !ok || exp <= float64(time.Now().Unix()+30) {
-		return s, fault.New("AUTH_EXPIRED", "Session expirée ; lancer tripo-mcp login.")
+	if !ok || exp <= 0 || exp > 253402300799 {
+		return s, fault.New("AUTH_REQUIRED", "Expiration de session invalide.")
 	}
 	identity := ""
 	for _, key := range []string{"sub", "user_id", "userId", "uid", "account_id"} {
@@ -70,7 +83,7 @@ func FromHeader(header, device, region string) (Session, error) {
 
 func Save(root string, s Session) error {
 	// Re-derive identity and expiry instead of trusting an imported record.
-	verified, err := FromHeader("Bearer "+s.Token, s.DeviceID, s.Region)
+	verified, err := validate(s)
 	if err != nil {
 		return err
 	}
@@ -100,7 +113,7 @@ func Load(root string) (Session, error) {
 	if json.Unmarshal(b, &s) != nil {
 		return s, fault.New("AUTH_REQUIRED", "Session illisible ; relancer tripo-mcp login.")
 	}
-	return FromHeader("Bearer "+s.Token, s.DeviceID, s.Region)
+	return validate(s)
 }
 
 func Inspect(root string) Status {
@@ -108,7 +121,37 @@ func Inspect(root string) Status {
 	if err != nil {
 		return Status{}
 	}
-	return Status{Authenticated: true, Expires: s.Expires}
+	return s.Status()
+}
+
+// Status inspects local credentials only. It does not contact or modify Studio.
+func (s Session) Status() Status {
+	renewable := s.Cookie != "" && (s.SessionExpires.IsZero() || s.SessionExpires.After(time.Now()))
+	v := Status{Authenticated: renewable || s.Expires.After(time.Now().Add(30*time.Second)), Expires: s.Expires, Renewable: renewable, NeedsRefresh: !s.Expires.After(time.Now().Add(time.Minute))}
+	if !s.SessionExpires.IsZero() {
+		v.SessionExpires = &s.SessionExpires
+	}
+	return v
+}
+
+func validate(s Session) (Session, error) {
+	v, err := parseHeader("Bearer "+s.Token, s.DeviceID, s.Region)
+	if err != nil {
+		return Session{}, err
+	}
+	if s.Cookie != "" {
+		v.Cookie, err = sessionCookie(s.Cookie)
+		if err != nil {
+			return Session{}, err
+		}
+		v.SessionExpires = s.SessionExpires
+		if !v.SessionExpires.IsZero() && !v.SessionExpires.After(time.Now()) {
+			return Session{}, fault.New("AUTH_EXPIRED", "Connexion Studio expirée ; refaire le transfert avec tripo-mcp login.")
+		}
+	} else if !v.Expires.After(time.Now().Add(30 * time.Second)) {
+		return Session{}, fault.New("AUTH_EXPIRED", "Jeton temporaire expiré ; lancer tripo-mcp login et transférer le cookie de session pour activer le renouvellement.")
+	}
+	return v, nil
 }
 
 func Logout(root string) error {

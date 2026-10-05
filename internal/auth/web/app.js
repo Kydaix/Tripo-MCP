@@ -14,10 +14,11 @@ form.addEventListener('submit', async event => {
     const input = parseSession(document.querySelector('#request').value, {
       authorization: document.querySelector('#authorization').value,
       device: document.querySelector('#device').value,
-      region: document.querySelector('#region').value
+      region: document.querySelector('#region').value,
+      cookie: document.querySelector('#cookie').value
     });
     form.reset();
-    message('Vérification de la session auprès de Studio…');
+    message(input.session_cookie ? 'Vérification du renouvellement auprès de Studio…' : 'Vérification du jeton temporaire auprès de Studio…');
     const response = await fetch('/session', {
       method: 'POST', cache: 'no-store',
       headers: {'Content-Type': 'application/json', 'X-Tripo-MCP-Transfer': capability},
@@ -26,7 +27,13 @@ form.addEventListener('submit', async event => {
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Transfert refusé ou expiré. Relance tripo-mcp login.');
     const result = await response.json();
     if (!response.ok) throw new Error(result.error?.message || 'Session refusée.');
-    message('Connexion enregistrée. Valide jusqu’au ' + new Date(result.expires_at).toLocaleString() + '. Tu peux fermer cette page.');
+    if (result.renewable) {
+      message(result.session_expires_at
+        ? 'Renouvellement automatique activé. Connexion Studio valable jusqu’au ' + new Date(result.session_expires_at).toLocaleString() + ', sauf révocation. Tu peux fermer le navigateur.'
+        : 'Renouvellement automatique activé tant que la session Studio reste valide. Tu peux fermer le navigateur.');
+    } else {
+      message('Jeton temporaire enregistré jusqu’au ' + new Date(result.expires_at).toLocaleString() + '. Pour activer le renouvellement, relance tripo-mcp login et ajoute le cookie de session.');
+    }
     button.textContent = 'Connecté';
   } catch (error) { message(error.message || 'Service local arrêté. Relance tripo-mcp login.', true); button.disabled = false; }
 });

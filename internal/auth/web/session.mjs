@@ -10,5 +10,12 @@ export function parseSession(text, fields = {}) {
     throw new Error("La copie doit contenir Authorization: Bearer … et x-tripo-device-id. Sinon, utilise les champs manuels.");
   }
   if (/[\r\n]/.test(device + region)) throw new Error("En-tête invalide.");
-  return {authorization: "Bearer " + bearer.slice(7), device_id: device, region};
+  const input = {authorization: "Bearer " + bearer.slice(7), device_id: device, region};
+  const cookie = fields.cookie?.trim() || text.match(/\bory_kratos_session=([^;\s"'\\^]+)/)?.[1] || '';
+  if (cookie) {
+    const value = cookie.replace(/^ory_kratos_session=/, '');
+    if (!value || value.length > 8192 || /[^\x21-\x7e]|[";,\\]/.test(value)) throw new Error('Copie uniquement la valeur du cookie ory_kratos_session.');
+    input.session_cookie = value;
+  }
+  return input;
 }
