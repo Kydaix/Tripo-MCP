@@ -27,7 +27,7 @@ func TestMCPRoundTrip(t *testing.T) {
 	}
 	defer cs.Close()
 	list, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
-	if err != nil || len(list.Tools) != 6 {
+	if err != nil || len(list.Tools) != 10 {
 		t.Fatalf("tool list: %v %v", list, err)
 	}
 	for _, tool := range list.Tools {

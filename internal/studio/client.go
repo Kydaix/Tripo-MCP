@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -126,6 +127,9 @@ type Receipt struct {
 	OperatorID string `json:"operator_id"`
 }
 type Progress struct {
+	Reason *struct {
+		Code int `json:"code"`
+	} `json:"reason,omitempty"`
 	OperatorID string  `json:"operator_id"`
 	Status     string  `json:"status"`
 	Progress   float64 `json:"progress"`
@@ -195,9 +199,25 @@ func AssetURL(project map[string]any) string {
 	return ""
 }
 
+// Studio can return FBX for quad topology. Do not relabel it as a GLB.
+func ModelFormat(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fault.New("INVALID_ASSET", "Adresse de modèle invalide.")
+	}
+	ext := strings.ToLower(path.Ext(u.Path))
+	switch ext {
+	case ".glb":
+		return "glb", nil
+	case ".fbx":
+		return "fbx", nil
+	}
+	return "", fault.New("ASSET_UNAVAILABLE", "Format natif non reconnu ; demander un export explicite.")
+}
+
 func Terminal(status string) bool {
 	switch strings.ToLower(status) {
-	case "success", "failed", "banned", "cancelled", "expired":
+	case "success", "failed", "banned", "cancelled", "expired", "partial":
 		return true
 	}
 	return false

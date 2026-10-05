@@ -43,7 +43,42 @@ tripo-mcp download hibou-fbx-001 --out C:\Models\hibou.fbx
 
 Une image locale PNG, JPEG ou WebP de 20 Mo maximum peut remplacer le prompt avec `--image C:\Images\reference.png`.
 
-Par défaut : modèle `v3.1-20260211`, 20 000 faces, textures standard, visibilité privée. Options : `--faces`, `--model`, `--no-texture`, `--visibility private|shareable|public`. `--dry-run` valide les paramètres localement ; ce n’est pas un devis de crédits.
+Par défaut : H3.1, 20 000 triangles, textures standard 2K, visibilité privée. `--dry-run` valide les paramètres et les fichiers localement ; ce n’est pas un devis de crédits. `tripo-mcp capabilities` donne le catalogue et `generate --help` liste les options.
+
+Les contrôles du générateur Studio sont exposés : modèles H2.5/H3.0/H3.1 et Smart Mesh P1.0/P2.0, Ultra Mesh Quality, AI Complete, triangles/quadrangles, budget de polygones, génération en parties avec niveau de détail, textures 2K/4K/8K, PBR, retrait d’éclairage, alignement, pose en T et visibilité. Les entrées peuvent être un texte, une image, quatre emplacements multivues ou un lot d’images indépendantes.
+
+```powershell
+tripo-mcp generate --prompt "Un robot stylisé" --model h3.1 --geometry-quality detailed --faces 2000000 --texture-quality extreme --request-id robot-hd --yes
+tripo-mcp generate --image C:\Images\reference.png --model p2.0 --quad --variation-faces 5000,10000 --request-id robot-p2 --yes
+tripo-mcp wait robot-p2
+tripo-mcp download robot-p2:1
+```
+
+P2.0 produit de la géométrie ; utiliser ensuite `edit --operation texture`. Studio peut livrer un FBX pour les quadrangles : le téléchargement détecte le format natif, sans le renommer GLB. Pour obtenir un autre format, demander un export explicite. Le nombre de variantes est explicite : `--count 1|2|4`, ou `--variation-faces` pour des budgets individuels. Chaque variante conserve son reçu dans un journal commun ; une réussite partielle ne perd pas les modèles acceptés. Utiliser les identifiants `job:1`, `job:2`, etc. pour les traiter séparément. La visibilité privée reste le défaut.
+
+Tous les paramètres sont aussi utilisables dans un fichier JSON via `--params C:\options.json`, avec les mêmes noms de champs que le MCP. Le fichier est exclusif avec les options métier et n’inclut ni `confirm`, ni `request_id`, ni `job_id` ; ces derniers restent des arguments de commande.
+
+## Texturer et retravailler
+
+```powershell
+tripo-mcp edit robot-p2:1 --operation texture --prompt "Métal peint rouge, articulations en acier" --texture-quality extreme --delight --request-id robot-texture --yes
+tripo-mcp wait robot-texture
+tripo-mcp download robot-texture
+tripo-mcp export robot-texture --format fbx --texture-size 8192 --request-id robot-fbx --yes
+tripo-mcp wait robot-fbx
+tripo-mcp download robot-fbx
+tripo-mcp edit robot-texture --operation remesh --faces 5000 --quad --request-id robot-remesh --yes
+```
+
+Les opérations `texture`, `upscale`, `pbr`, `remesh`, `segment`, `fill`, `complete`, `rig` et `animate` passent par `edit`. La texture accepte un prompt, une image, des multivues et une image de style ; le remesh peut reprojeter les textures. Les noms de parties permettent de cibler la texture ou la retopologie ; par défaut, ils sont lus automatiquement dans le GLB/FBX source. Le remplissage rapide (`fill`) ou par IA (`complete`) cible les parties indiquées.
+
+**Chaque édition modifie la version courante du projet Studio.** Exporter/télécharger une version avant de l’éditer, puis utiliser l’identifiant de la nouvelle tâche. Si Studio possède une autre version courante, l’édition ou l’export est refusé avec `SOURCE_CHANGED` ; aucune restauration n’est faite automatiquement.
+
+Pour un modèle local : `tripo-mcp import --model-file C:\Models\objet.glb --request-id objet-import --yes`, puis attendre et utiliser cette tâche avec `edit`. Formats d’entrée : GLB, FBX, OBJ et STL ; limite locale de 100 Mo. Un OBJ doit contenir sa géométrie ; les fichiers MTL et textures annexes ne sont pas téléversés. Pour un projet déjà présent dans Studio : `tripo-mcp attach --project-id ID --request-id objet-existant` (lecture distante seule).
+
+Les exports proposent GLB, FBX, OBJ, STL, 3MF et USDZ, textures de 512 à 8192 pixels, packaging intégré ou ZIP, regroupement UV, presets FBX et options d’animation. Une archive ZIP est téléchargée telle quelle, sans extraction automatique. Son chemin de sortie doit finir en `.zip`.
+
+La [correspondance détaillée des paramètres](docs/studio-controls.md) précise les limites et les fonctions qui restent dans l’éditeur visuel.
 
 Les résultats sont en JSON et les diagnostics sur stderr. `generate` rend la main dès l’acceptation. `status JOB`, `wait JOB` et `jobs` permettent de reprendre plus tard. Fermer le terminal n’annule pas une génération distante.
 
@@ -67,13 +102,17 @@ Serveur stdio : `tripo-mcp mcp`. Exemple de configuration :
 | Outil | Résultat |
 |---|---|
 | `tripo_status` | Connexion, abonnement et crédits Studio |
-| `tripo_generate` | Soumission texte/image et identifiant de tâche |
+| `tripo_capabilities` | Modèles, réglages, bornes et limites locales |
+| `tripo_generate` | Génération HD/Smart Mesh, texte/image/multivues/lots et variantes |
+| `tripo_edit` | Texture, upscale, PBR, remesh, segmentation, fermeture/complétion de parties, rigging et animation |
+| `tripo_import_model` | Téléversement d’un modèle local dans Studio |
+| `tripo_attach` | Rattachement d’un projet Studio existant |
 | `tripo_job` | Progression d’une tâche |
 | `tripo_jobs` | Journal local |
 | `tripo_download` | Chemin du fichier, taille et SHA-256 |
-| `tripo_export` | Export explicite GLB ou FBX |
+| `tripo_export` | Export explicite avec format, textures, UV et animations |
 
-`tripo_generate` et `tripo_export` exigent un `request_id` stable et `confirm: true` lorsque l’utilisateur a autorisé l’opération. Une demande explicite de génération autorise cette génération dans le périmètre donné.
+Les opérations payantes et l’import exigent un `request_id` stable et `confirm: true` lorsque l’utilisateur a autorisé l’opération. Une demande explicite autorise l’opération dans le périmètre donné. `tripo_attach` exige un identifiant stable mais ne consomme pas de crédits.
 
 ## Crédits et interruptions
 
@@ -95,7 +134,7 @@ go vet ./...
 go build -o dist/tripo-mcp.exe .
 ```
 
-Tests sans crédits : contrats HTTP, doubles soumissions, réponses incertaines, verrouillage concurrent, protection de session, validation des fichiers et échange MCP en mémoire. La validation réelle initiale couvre texte → modèle → GLB et export FBX. Le parcours image nécessite encore une validation réelle de l’upload.
+Tests sans crédits : contrats HTTP HD/P2/multivues/lots/texture/import/rig/export, variantes partiellement acceptées, reprises, doubles soumissions, sources remplacées, verrouillage concurrent, protection de session, validation des fichiers, CLI et échanges MCP. Les validations réelles couvrent texte HD → GLB et export FBX, puis texte P2.0 → FBX avec quadrangles → texture 8K → export GLB 8K. Les images intégrées aux fichiers ont été vérifiées dans Blender à 8192 × 8192 pixels. Les autres combinaisons restent vérifiées par contrats ; cela ne prouve pas leur acceptation par le serveur ni les droits d’un abonnement.
 
 Architecture : `internal/auth` (connexion), `internal/studio` (transport), `internal/engine` (tâches), `internal/mcpserver` (adaptateur). CLI et MCP appellent les mêmes opérations. Les tags `v*` publient les deux exécutables Windows et leurs empreintes après les tests.
 

@@ -20,6 +20,7 @@ import (
 )
 
 const MaxImageBytes = 20 << 20
+const MaxModelBytes = 100 << 20
 
 type Image struct {
 	Bucket string `json:"bucket"`
@@ -54,7 +55,45 @@ func ValidateImage(path string) (string, error) {
 var bucketRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
 func (c *Client) Upload(ctx context.Context, path string) (*Image, error) {
-	format, err := ValidateImage(path)
+	return c.upload(ctx, path, false)
+}
+func (c *Client) UploadModel(ctx context.Context, path string) (*Image, error) {
+	return c.upload(ctx, path, true)
+}
+func ValidateInputModel(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", invalid("Le chemin du modèle doit être absolu.")
+	}
+	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if !oneOf(format, "glb", "fbx", "obj", "stl") {
+		return "", invalid("Import : GLB, FBX, OBJ ou STL.")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > MaxModelBytes {
+		return "", invalid("Modèle vide, inaccessible ou supérieur à la limite locale de 100 Mo.")
+	}
+	if format != "obj" {
+		f, err := os.Open(path)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		if err = ValidateModel(f, info.Size(), format); err != nil {
+			return "", err
+		}
+	}
+	return format, nil
+}
+func (c *Client) upload(ctx context.Context, path string, model bool) (*Image, error) {
+	var format string
+	var err error
+	maxBytes := int64(MaxImageBytes)
+	if model {
+		format, err = ValidateInputModel(path)
+		maxBytes = MaxModelBytes
+	} else {
+		format, err = ValidateImage(path)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +116,8 @@ func (c *Client) Upload(ctx context.Context, path string) (*Image, error) {
 	}
 	defer f.Close()
 	h := sha256.New()
-	size, err := io.Copy(h, io.LimitReader(f, MaxImageBytes+1))
-	if err != nil || size > MaxImageBytes {
+	size, err := io.Copy(h, io.LimitReader(f, maxBytes+1))
+	if err != nil || size > maxBytes {
 		return nil, fault.New("INVALID_ARGUMENT", "Image illisible ou trop volumineuse.")
 	}
 	if _, err = f.Seek(0, io.SeekStart); err != nil {
@@ -107,6 +146,9 @@ func (c *Client) Upload(ctx context.Context, path string) (*Image, error) {
 		return nil, fault.New("UPLOAD_FAILED", "Le stockage a refusé l'image.")
 	}
 	image := &Image{Bucket: token.Bucket, Key: token.Key, Source: "upload"}
+	if model {
+		return image, nil
+	}
 	var audit struct {
 		Result string `json:"result"`
 	}
