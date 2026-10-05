@@ -47,11 +47,11 @@ form { margin-top: 26px; }
 fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
 .field + .field { margin-top: 22px; }
 label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-weight: 600; font-size: .9375rem; margin-bottom: 8px; }
-.recommended, .optional { font-size: .8125rem; font-weight: 400; color: var(--muted); }
-textarea, input { display: block; width: 100%; min-height: 46px; border: 1px solid #aebfb3; border-radius: 7px; padding: 11px 12px; color: #1d302b; background: #fcfdfb; font: 1rem ui-monospace, "Cascadia Mono", Consolas, monospace; line-height: 1.45; caret-color: var(--accent); }
+.recommended, .optional { font-size: .875rem; font-weight: 400; color: var(--muted); }
+textarea, input { display: block; width: 100%; min-height: 46px; border: 1px solid #7b8e80; border-radius: 7px; padding: 11px 12px; color: #1d302b; background: #fcfdfb; font: 1rem ui-monospace, "Cascadia Mono", Consolas, monospace; line-height: 1.45; caret-color: var(--accent); }
 textarea { resize: vertical; min-height: 142px; max-height: 400px; }
 textarea::placeholder, input::placeholder { color: #68766d; opacity: 1; }
-textarea:hover, input:hover { border-color: #839b8b; }
+textarea:hover, input:hover { border-color: #657e6d; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #ab352e; }
 .hint { font-size: .875rem; line-height: 1.5; color: var(--muted); margin-top: 8px; }
@@ -63,7 +63,8 @@ details .field + .field { margin-top: 16px; }
 button { width: 100%; min-height: 48px; border: 1px solid transparent; border-radius: 7px; background: var(--accent); color: #fff; font: 600 .9375rem "Segoe UI", system-ui, sans-serif; padding: 12px 20px; cursor: pointer; margin-top: 20px; }
 button:hover { background: #194934; }
 button:active { background: #123b29; }
-fieldset:disabled button { background: #526d5e; cursor: wait; }
+fieldset:disabled button { background: #526d5e; cursor: not-allowed; }
+form[aria-busy="true"] button { cursor: wait; }
 fieldset:disabled input, fieldset:disabled textarea { color: var(--muted); background: #f1f4ef; }
 #status:empty { display: none; }
 #status { margin-top: 20px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 7px; background: #f4f7f2; font-size: .9375rem; overflow-wrap: anywhere; }
