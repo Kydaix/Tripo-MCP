@@ -21,10 +21,18 @@ La page a été exercée dans un navigateur Chromium isolé, avec un serveur loc
 
 Les workflows de PR et de release exécutent `go vet`, les tests Go, le détecteur de courses et `govulncheck`, puis les tests JavaScript. Les builds Windows amd64 et arm64 sont vérifiés avant publication. Node et le navigateur de test ne sont pas des dépendances de l'exécutable distribué.
 
+## Correctif de validation d’image — v0.3.2
+
+Un essai réel après cet audit a révélé un défaut non couvert : le client attendait `normal`, alors que `/v2/studio/audit/image` renvoie `pass` pour une image acceptée. Le téléversement réussissait, mais le client affichait à tort `IMAGE_REJECTED`, avant toute génération payante. Le problème a été reproduit avec deux images distinctes, puis leur import a réussi avec le correctif. Ce parcours est commun aux références de génération, multivues et texture.
+
+Les tests distinguent désormais acceptation, refus, vérification manuelle, résultat absent ou inconnu, réponse mal formée et erreur serveur. Le verdict accepté est transmis tel quel dans `image_audit_result` ; aucune validation Studio n’est contournée.
+
+Le parcours MCP stdio a ensuite été validé de bout en bout : image PNG → H3.1 standard avec texture, budget demandé de 18 000 triangles → téléchargement du GLB natif (3 130 384 octets, signature et SHA-256 vérifiés). Une seule génération a été soumise, pour un débit mesuré de 30 crédits Studio. Les deux imports de diagnostic précédents n’ont pas débité de crédits.
+
 ## Limites restantes
 
 Studio n'offre pas de contrat public pour ces interfaces. Une évolution de ses endpoints, des contrôles humains, des droits ou des tarifs peut interrompre le client. Les échecs sont signalés sans basculement vers l'API commerciale ni contournement d'une vérification.
 
-Les validations payantes réalisées avant cet audit couvrent les parcours texte HD → GLB/FBX et texte P2.0 → FBX quad → texture 8K → GLB 8K. Les autres opérations restent couvertes par des contrats simulés, sans garantie que toutes leurs combinaisons soient acceptées sur chaque abonnement.
+Les validations payantes couvrent les parcours texte HD → GLB/FBX, texte P2.0 → FBX quad → texture 8K → GLB 8K, et désormais image HD → GLB texturé. Les autres opérations restent couvertes par des contrats simulés, sans garantie que toutes leurs combinaisons soient acceptées sur chaque abonnement.
 
 La protection contre les doublons repose sur le journal de ce poste et un `request_id` stable. Elle ne coordonne pas plusieurs PC. Un résultat `outcome_unknown` doit être vérifié dans l'historique Studio avant une nouvelle demande. Une modification depuis le navigateur peut aussi intervenir entre le dernier contrôle de version et l'opération distante ; le service Studio reste responsable de l'atomicité de cette dernière.
